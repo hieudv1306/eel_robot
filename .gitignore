@@ -1,0 +1,17 @@
+# Build artifacts
+*.o
+*.d
+/11_lbm_eel_3dof
+
+# Python/local environments
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Generated simulation outputs
+/tmp/
+/outputs/
+
+# Local tool state
+/.codex
