@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/enums.hpp"
 #include "core/types.hpp"
 
 struct EelParams {
@@ -21,6 +22,7 @@ struct EelParams {
   T      eelFreq      = 1.6;
   T      eelLambda    = 1.0;
   T      eelA0        = 0.07;
+  GeometryKinematics geometryKinematics = GeometryKinematics::HeightWave;
   T      restTime     = 0.2;
   T      rampTime     = 1.6;
 

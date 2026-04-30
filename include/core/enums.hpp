@@ -66,6 +66,39 @@ inline const char* warmupModeName(WarmupMode m) {
   return "rest";
 }
 
+// Top/bottom wall boundary type. NoSlip = bounce-back (legacy default);
+// FreeSlip = full-slip (specular reflection) — removes channel-blockage drag
+// from finite-ny domains, important for fair shape comparisons in AR sweeps.
+enum class WallBoundary { NoSlip, FreeSlip };
+
+inline WallBoundary parseWallBoundary(const std::string& s) {
+  if (s == "freeslip" || s == "free_slip" || s == "fullslip") return WallBoundary::FreeSlip;
+  return WallBoundary::NoSlip;
+}
+
+inline const char* wallBoundaryName(WallBoundary w) {
+  return (w == WallBoundary::FreeSlip) ? "freeslip" : "noslip";
+}
+
+// Centerline kinematic construction.
+// HeightWave preserves the legacy y=A(s)sin(...) geometry.
+// InextensibleWave integrates a tangent-angle wave so segment lengths stay
+// fixed while retaining the same wave phase/envelope controls.
+enum class GeometryKinematics { HeightWave, InextensibleWave };
+
+inline GeometryKinematics parseGeometryKinematics(const std::string& s) {
+  if (s == "inextensible_wave" || s == "inextensible" ||
+      s == "tangent_angle" || s == "tangentAngle") {
+    return GeometryKinematics::InextensibleWave;
+  }
+  return GeometryKinematics::HeightWave;
+}
+
+inline const char* geometryKinematicsName(GeometryKinematics g) {
+  return (g == GeometryKinematics::InextensibleWave)
+       ? "inextensible_wave" : "height_wave";
+}
+
 // Gait normalization modes.
 enum class GaitNormalization { Fixed, TailAmpRatio, TargetSt };
 

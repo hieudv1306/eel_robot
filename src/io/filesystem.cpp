@@ -133,7 +133,9 @@ std::string makeBaseRunId(const EelParams& p, SimulationCase simCase,
                     + "_AR" + formatValueForRunId(p.aspectRatio)
                     + "_tau" + formatValueForRunId(p.tau)
                     + "_kap" + formatValueForRunId(p.kappa)
-                    + "_sub" + std::to_string(p.substeps);
+                    + "_sub" + std::to_string(p.substeps)
+                    + "_kin_" + sanitizePathToken(
+                        geometryKinematicsName(p.geometryKinematics));
   runId += "_N" + std::to_string(p.nx) + "x" + std::to_string(p.ny);
   if (!runTag.empty()) {
     runId += "_" + sanitizePathToken(runTag);
@@ -150,4 +152,3 @@ std::string makeUniqueRunId(const std::string& baseRunId,
   }
   return candidate;
 }
-

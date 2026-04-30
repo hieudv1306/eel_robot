@@ -49,10 +49,11 @@ CsvWriteResult appendArSummaryCsv(const std::string& requestedPath,
     "alphaIBM,legacyKappaInputUsed,ibmIterations,meanResidualSlip,"
     "maxResidualSlip,meanConstraintPower,meanRigidBodyPower,"
     "meanDeformationPower,meanAbsConstraintPower,meanAbsRigidBodyPower,"
-    "meanAbsDeformationPower,transportEfficiencyDef,cotDef";
+    "meanAbsDeformationPower,transportEfficiencyDef,cotDef,wallBoundary,"
+    "geometryKinematics,ibmCoupling";
 
   CsvWriteResult result;
-  result.resolution = resolveCsvPath(requestedPath, summaryHeader, "_metrics_v6");
+  result.resolution = resolveCsvPath(requestedPath, summaryHeader, "_metrics_v9");
 
   std::ifstream probe(result.resolution.path);
   const bool writeHeader = !probe.good() || probe.peek() == std::ifstream::traits_type::eof();
@@ -129,7 +130,10 @@ CsvWriteResult appendArSummaryCsv(const std::string& requestedPath,
       << in.steady.meanAbsRigidBodyPower << ","
       << in.steady.meanAbsDeformationPower << ","
       << in.steady.transportEfficiencyDef << ","
-      << in.steady.cotDef << "\n";
+      << in.steady.cotDef << ","
+      << wallBoundaryName(in.wallBoundary) << ","
+      << geometryKinematicsName(in.p.geometryKinematics) << ","
+      << "sparse_eulerian_mdf" << "\n";
   return result;
 }
 
@@ -154,10 +158,11 @@ CsvWriteResult appendVerificationSummaryCsv(const std::string& requestedPath,
     "alphaIBM,legacyKappaInputUsed,ibmIterations,meanResidualSlip,"
     "maxResidualSlip,meanConstraintPower,meanRigidBodyPower,"
     "meanDeformationPower,meanAbsConstraintPower,meanAbsRigidBodyPower,"
-    "meanAbsDeformationPower,transportEfficiencyDef,cotDef";
+    "meanAbsDeformationPower,transportEfficiencyDef,cotDef,wallBoundary,"
+    "geometryKinematics,ibmCoupling";
 
   CsvWriteResult result;
-  result.resolution = resolveCsvPath(requestedPath, verificationHeader, "_metrics_v6");
+  result.resolution = resolveCsvPath(requestedPath, verificationHeader, "_metrics_v9");
 
   std::ifstream probe(result.resolution.path);
   const bool writeHeader = !probe.good() || probe.peek() == std::ifstream::traits_type::eof();
@@ -252,7 +257,10 @@ CsvWriteResult appendVerificationSummaryCsv(const std::string& requestedPath,
       << in.steady.meanAbsRigidBodyPower << ","
       << in.steady.meanAbsDeformationPower << ","
       << in.steady.transportEfficiencyDef << ","
-      << in.steady.cotDef << "\n";
+      << in.steady.cotDef << ","
+      << wallBoundaryName(in.wallBoundary) << ","
+      << geometryKinematicsName(in.p.geometryKinematics) << ","
+      << "sparse_eulerian_mdf" << "\n";
   return result;
 }
 

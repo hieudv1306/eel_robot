@@ -65,6 +65,10 @@ RunConfig parseCommandLine(int argc, char* argv[], const std::string& baseLogDir
     if (key == "--nWarmup")       config.p.nWarmup = std::stoi(val);
     if (key == "--warmupMode")    config.warmupMode = parseWarmupMode(val);
     if (key == "--gaitNormalization") config.gaitNormalization = parseGaitNormalization(val);
+    if (key == "--geometryKinematics" || key == "--kinematics") {
+      config.p.geometryKinematics = parseGeometryKinematics(val);
+    }
+    if (key == "--wallBoundary")  config.wallBoundary = parseWallBoundary(val);
     if (key == "--tailAmpRatioTarget") config.tailAmpRatioTarget = std::stod(val);
     if (key == "--targetSt")      config.targetSt = std::stod(val);
     if (key == "--referenceU")    config.referenceU = std::stod(val);

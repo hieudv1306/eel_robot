@@ -13,6 +13,7 @@ struct RunConfig {
   SimulationCase simCase = SimulationCase::SurgeOnly;
   WarmupMode warmupMode = WarmupMode::Rest;
   GaitNormalization gaitNormalization = GaitNormalization::Fixed;
+  WallBoundary wallBoundary = WallBoundary::NoSlip;
   T alphaIBM = 1.0;
   int ibmIterations = 1;
   bool legacyKappaInputUsed = false;

@@ -1,7 +1,9 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <unordered_map>
 #include <vector>
 
 #include "core/params.hpp"
@@ -46,10 +48,10 @@ struct IbmResult {
   T meanSlipMag = 0.0;
   T maxSlipMag = 0.0;
   // Residual slip = mismatch left over after the multi-direct-forcing
-  // iterations, measured against the per-marker LOCAL velocity estimate
-  // (U_interp + Σ ΔF·dt/ρ).  This is a marker-local convergence metric for
-  // the iterative correction loop; it is NOT the post-fluid-update slip
-  // (which only becomes observable on the next IBM pass).
+  // iterations, measured against a marker velocity re-interpolated from the
+  // sparse Eulerian correction buffer.  This is an IBM-iteration convergence
+  // metric; it is NOT the post-fluid-update slip (which only becomes
+  // observable on the next IBM pass).
   T meanResidualSlipMag = 0.0;
   T maxResidualSlipMag  = 0.0;
   // Marker-force statistics are unweighted per-marker averages of the direct-
@@ -78,12 +80,14 @@ struct IbmResult {
 //      coefficient alphaIBM therefore equals the classical penalty gain in
 //      the non-dimensional setting (alphaIBM=2 ≡ legacy --kappa=2).
 //
-//  Multi direct forcing iterations (Wang & Zhang 2011 style, local
+//  Multi direct forcing iterations (Wang & Zhang 2011 style, Eulerian-buffer
 //  approximation):
 //    * One velocity interpolation per marker per IBM call.
-//    * Per-iteration: residual = U_desired - U_estimate, dF accumulates,
-//      U_estimate += dF · dt / ρ (local correction).  No collide-stream
-//      and no Eulerian re-spreading inside the loop, per the task spec.
+//    * Per-iteration: residual = U_desired - U_estimate, dF accumulates.
+//      The incremental force is spread to a sparse Eulerian velocity-
+//      correction buffer and subsequent iterations re-interpolate from that
+//      buffer.  This captures marker cross-talk through the same Peskin kernel
+//      used for the final OpenLB FORCE field, without advancing the fluid.
 //    * The accumulated marker force is spread into the FORCE field once,
 //      after the loop.  This preserves the existing
 //      single-IBM-per-collideAndStream coupling order.
@@ -111,18 +115,32 @@ void ibmStep(
   const T rhoLocal = T(1);
   const T dtEff    = T(1);
   const T gain     = alphaIBM * rhoLocal / dtEff;
-  const T kick     = dtEff / rhoLocal;  // ΔU per unit ΔF in the local model
+  const T kick     = dtEff / rhoLocal;  // ΔU per unit Eulerian force density
 
-  // First pass: interpolate the fluid velocity at every marker exactly once.
-  // U_estimate seeds the iteration loop; the initial slip uses U_interp.
+  struct MarkerStencil {
+    int n = 0;
+    std::array<int, 16> cell{};
+    std::array<T, 16> weight{};
+  };
+  struct VelocityCorrection {
+    T u = T(0);
+    T v = T(0);
+  };
+
+  // First pass: cache the Peskin support and interpolate the fluid velocity at
+  // every marker exactly once.  Later IBM iterations re-interpolate only the
+  // sparse Eulerian correction field.
   std::vector<T> uInterp(nM, T(0));
   std::vector<T> vInterp(nM, T(0));
   std::vector<T> uEst(nM, T(0));
   std::vector<T> vEst(nM, T(0));
   std::vector<T> fxAcc(nM, T(0));
   std::vector<T> fyAcc(nM, T(0));
+  std::vector<T> dFx(nM, T(0));
+  std::vector<T> dFy(nM, T(0));
   std::vector<int> i0Marker(nM, 0);
   std::vector<int> j0Marker(nM, 0);
+  std::vector<MarkerStencil> stencils(nM);
 
   for (int m = 0; m < nM; ++m) {
     const T xm = markers.x[m];
@@ -139,6 +157,10 @@ void ibmStep(
         const int jj = j0 + dj;
         if (ii >= 0 && ii < nx && jj >= 0 && jj < ny) {
           const T d = delta2D(xm - T(ii), ym - T(jj));
+          MarkerStencil& stencil = stencils[m];
+          stencil.cell[stencil.n] = ii * ny + jj;
+          stencil.weight[stencil.n] = d;
+          ++stencil.n;
           T uCell[2] = {0.0, 0.0};
           sLattice.get(0, ii, jj).computeU(uCell);
           uI += uCell[0] * d;
@@ -152,21 +174,60 @@ void ibmStep(
     vEst[m] = vI;
   }
 
-  // MDF iterations.  With alphaIBM=1 the local estimate converges in one
-  // iteration (residual = 0); with alphaIBM<1 the loop is a relaxation
-  // approach.  Iteration count is clamped to ≥1 so N=1 reproduces the
-  // classical single-pass direct forcing exactly.
+  std::unordered_map<int, VelocityCorrection> eulerianCorrection;
+  eulerianCorrection.reserve(static_cast<size_t>(std::max(1, nM) * 8));
+
+  auto interpolateCorrection = [&](int m, T& uCorr, T& vCorr) {
+    uCorr = T(0);
+    vCorr = T(0);
+    const MarkerStencil& stencil = stencils[m];
+    for (int k = 0; k < stencil.n; ++k) {
+      const auto it = eulerianCorrection.find(stencil.cell[k]);
+      if (it == eulerianCorrection.end()) continue;
+      const T w = stencil.weight[k];
+      uCorr += it->second.u * w;
+      vCorr += it->second.v * w;
+    }
+  };
+
+  auto spreadCorrection = [&](int m, T fx, T fy) {
+    const MarkerStencil& stencil = stencils[m];
+    const T dsM = markers.ds[m];
+    for (int k = 0; k < stencil.n; ++k) {
+      const T scaledWeight = dsM * stencil.weight[k] * kick;
+      auto& corr = eulerianCorrection[stencil.cell[k]];
+      corr.u += fx * scaledWeight;
+      corr.v += fy * scaledWeight;
+    }
+  };
+
+  // MDF iterations.  N=1 still reproduces the classical single-pass direct
+  // forcing exactly in the final FORCE field.  N>1 now re-spreads correction
+  // increments to a sparse Eulerian buffer and re-interpolates from it, so
+  // marker cross-coupling through the Peskin kernel is represented.
   for (int iter = 0; iter < nIters; ++iter) {
     for (int m = 0; m < nM; ++m) {
+      T uCorr = T(0), vCorr = T(0);
+      interpolateCorrection(m, uCorr, vCorr);
+      uEst[m] = uInterp[m] + uCorr;
+      vEst[m] = vInterp[m] + vCorr;
       const T sx = markers.ud[m] - uEst[m];
       const T sy = markers.vd[m] - vEst[m];
-      const T dFx = gain * sx;
-      const T dFy = gain * sy;
-      fxAcc[m] += dFx;
-      fyAcc[m] += dFy;
-      uEst[m]  += dFx * kick;
-      vEst[m]  += dFy * kick;
+      dFx[m] = gain * sx;
+      dFy[m] = gain * sy;
     }
+    for (int m = 0; m < nM; ++m) {
+      fxAcc[m] += dFx[m];
+      fyAcc[m] += dFy[m];
+      spreadCorrection(m, dFx[m], dFy[m]);
+    }
+  }
+
+  for (int m = 0; m < nM; ++m) {
+    T uCorr = T(0), vCorr = T(0);
+    interpolateCorrection(m, uCorr, vCorr);
+    uEst[m] = uInterp[m] + uCorr;
+    vEst[m] = vInterp[m] + vCorr;
   }
 
   // Aggregate per-marker statistics, body-frame reaction force/torque, and
@@ -247,9 +308,9 @@ void ibmStep(
 
   // Replace the previous IBM Eulerian force field with the newly computed
   // marker force.  The time loop intentionally performs one IBM evaluation
-  // per collideAndStream(); repeating this pass without advancing the fluid
-  // would only reuse a stale velocity field.  The MDF iterations above
-  // happen entirely in marker space without re-spreading.
+  // per collideAndStream(); the MDF iterations above happen in a sparse
+  // Eulerian correction buffer, and the final accumulated marker force is
+  // spread into OpenLB once.
   resetForceField();
 
   for (int m = 0; m < nM; ++m) {

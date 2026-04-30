@@ -98,6 +98,7 @@ int main(int argc, char* argv[])
   bool& rawGeometryOverride = config.rawGeometryOverride;
   bool& aspectGeometryOverride = config.aspectGeometryOverride;
   T& tCut = config.tCut;
+  WallBoundary& wallBoundary = config.wallBoundary;
   std::string& summaryCsv = config.summaryCsv;
   std::string& sensitivityCsv = config.sensitivityCsv;
   std::string& runTag = config.runTag;
@@ -228,7 +229,8 @@ int main(int argc, char* argv[])
   clout << "Grid: " << nx << " x " << ny << "  tau=" << p.tau
         << "  nu=" << p.nu() << std::endl;
   clout << "Case: " << simulationCaseName(simCase)
-        << "  inflowU=" << (fixedInflow ? p.inflowVelocity : T(0)) << std::endl;
+        << "  inflowU=" << (fixedInflow ? p.inflowVelocity : T(0))
+        << "  wallBoundary=" << wallBoundaryName(wallBoundary) << std::endl;
   clout << "AR study: useAspectRatioGeometry=" << (p.useAspectRatioGeometry ? "true" : "false")
         << "  AR=" << p.aspectRatio
         << "  bodyAreaTarget=" << p.bodyAreaTarget
@@ -243,7 +245,10 @@ int main(int argc, char* argv[])
   clout << "Eel: centerlineL=" << p.centerlineLengthLU()
         << " lu  totalL=" << p.totalGeometricLengthLU()
         << " lu  W=" << p.bodyWidthLU()
-        << " lu  freq=" << p.eelFreq << "  lambda=" << p.eelLambda << std::endl;
+        << " lu  freq=" << p.eelFreq
+        << "  lambda=" << p.eelLambda
+        << "  geometryKinematics="
+        << geometryKinematicsName(p.geometryKinematics) << std::endl;
   clout << "Warmup: mode=" << warmupModeName(warmupMode)
         << "  nWarmup=" << p.nWarmup << std::endl;
   clout << "Gait normalization: requested=" << gaitNormalizationName(gaitNormalization)
@@ -274,7 +279,8 @@ int main(int argc, char* argv[])
         << "  ibmIterations=" << ibmIterations
         << "  legacyKappaInput=" << (legacyKappaInputUsed ? 1 : 0)
         << " (forcing law: F = alphaIBM * rho_local * (Ud - U_interp) / dt;"
-        << " rho_local=1.0, dt=1.0 in lattice units)"
+        << " rho_local=1.0, dt=1.0 in lattice units;"
+        << " iterations use sparse Eulerian correction re-interpolation)"
         << std::endl;
   clout << "IBM legacy params: kappa(stored)=" << p.kappa
         << "  nIbmIters(requested)=" << p.nIbmIters
@@ -322,7 +328,15 @@ int main(int argc, char* argv[])
 
   SuperLattice<T, DESCRIPTOR> sLattice(converter, superGeometry);
   dynamics::set<ForcedBGKdynamics<T, DESCRIPTOR>>(sLattice, superGeometry, 1);
-  boundary::set<boundary::BounceBack>(sLattice, superGeometry, 2);
+  // Top/bottom walls (material 2):
+  //   noslip   -> BounceBack (legacy default; channel walls)
+  //   freeslip -> FullSlip   (specular reflection; removes channel-blockage
+  //                            drag, important for AR shape comparisons)
+  if (wallBoundary == WallBoundary::FreeSlip) {
+    boundary::set<boundary::FullSlip>(sLattice, superGeometry, 2);
+  } else {
+    boundary::set<boundary::BounceBack>(sLattice, superGeometry, 2);
+  }
   if (fixedInflow) {
     boundary::set<boundary::InterpolatedVelocity>(sLattice, superGeometry, 3);
   } else {
@@ -1028,6 +1042,7 @@ int main(int argc, char* argv[])
   summaryInput.simCase = simCase;
   summaryInput.warmupMode = warmupMode;
   summaryInput.gaitNormalization = effectiveGaitNormalization;
+  summaryInput.wallBoundary = wallBoundary;
   summaryInput.initialPlacementClamped = clampAudit.initialPlacementClamped;
   summaryInput.initialPlacementClampCount = clampAudit.initialPlacementClampCount;
   summaryInput.runtimeDomainClampHit = clampAudit.runtimeDomainClampHit;
@@ -1067,6 +1082,7 @@ int main(int argc, char* argv[])
   verificationInput.studyMode = studyMode;
   verificationInput.warmupMode = warmupMode;
   verificationInput.gaitNormalization = effectiveGaitNormalization;
+  verificationInput.wallBoundary = wallBoundary;
   verificationInput.initialPlacementClamped = clampAudit.initialPlacementClamped;
   verificationInput.initialPlacementClampCount = clampAudit.initialPlacementClampCount;
   verificationInput.speedClampHit = clampAudit.speedClampHit;
@@ -1148,9 +1164,10 @@ int main(int argc, char* argv[])
         << "not a runtime issue)" << std::endl;
   clout << "warmupMode=" << warmupModeName(warmupMode)
         << "  gaitNormalization=" << gaitNormalizationName(effectiveGaitNormalization)
+        << "  geometryKinematics=" << geometryKinematicsName(p.geometryKinematics)
         << "  effectiveEelFreq=" << effectiveEelFreq
         << "  effectiveEelA0=" << effectiveEelA0 << std::endl;
-  clout << "IBM(v6): alphaIBM=" << alphaIBM
+  clout << "IBM(v7): alphaIBM=" << alphaIBM
         << "  ibmIterations=" << ibmIterations
         << "  legacyKappaInput=" << (legacyKappaInputUsed ? 1 : 0)
         << "  meanResidualSlip=" << steady.meanResidualSlip
