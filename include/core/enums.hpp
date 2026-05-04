@@ -99,6 +99,45 @@ inline const char* geometryKinematicsName(GeometryKinematics g) {
        ? "inextensible_wave" : "height_wave";
 }
 
+// Marker/body deformation source.
+// PrescribedWave keeps the legacy direct gait-to-marker path.
+// SoftBackbone builds markers from a soft-backbone state that follows the
+// preferred-curvature wave; fluid-to-backbone dynamics are added in the next
+// coupling step.
+enum class BodyKinematics { PrescribedWave, SoftBackbone };
+
+inline BodyKinematics parseBodyKinematics(const std::string& s) {
+  if (s == "soft_backbone" || s == "softBackbone" ||
+      s == "backbone" || s == "soft") {
+    return BodyKinematics::SoftBackbone;
+  }
+  return BodyKinematics::PrescribedWave;
+}
+
+inline const char* bodyKinematicsName(BodyKinematics k) {
+  return (k == BodyKinematics::SoftBackbone)
+       ? "soft_backbone" : "prescribed_wave";
+}
+
+// Body material used for inertia and soft-body stiffness estimates.
+enum class BodyMaterial { NeutralLattice, DragonSkin20 };
+
+inline BodyMaterial parseBodyMaterial(const std::string& s) {
+  if (s == "neutral" || s == "neutral_lattice" || s == "lattice") {
+    return BodyMaterial::NeutralLattice;
+  }
+  if (s == "dragon_skin_20" || s == "dragonskin20" ||
+      s == "dragonSkin20" || s == "ds20") {
+    return BodyMaterial::DragonSkin20;
+  }
+  return BodyMaterial::DragonSkin20;
+}
+
+inline const char* bodyMaterialName(BodyMaterial m) {
+  return (m == BodyMaterial::DragonSkin20)
+       ? "dragon_skin_20" : "neutral_lattice";
+}
+
 // Gait normalization modes.
 enum class GaitNormalization { Fixed, TailAmpRatio, TargetSt };
 

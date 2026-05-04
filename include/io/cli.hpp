@@ -14,6 +14,7 @@ struct RunConfig {
   WarmupMode warmupMode = WarmupMode::Rest;
   GaitNormalization gaitNormalization = GaitNormalization::Fixed;
   WallBoundary wallBoundary = WallBoundary::NoSlip;
+  BodyKinematics bodyKinematics = BodyKinematics::PrescribedWave;
   T alphaIBM = 1.0;
   int ibmIterations = 1;
   bool legacyKappaInputUsed = false;

@@ -57,8 +57,11 @@
 #include "io/csv_writer.hpp"
 #include "physics/geometry.hpp"
 #include "physics/markers.hpp"
+#include "physics/material.hpp"
 #include "physics/diagnostics.hpp"
 #include "physics/rigid_body.hpp"
+#include "physics/soft_backbone.hpp"
+#include "physics/soft_rod.hpp"
 #include "solver/boundary.hpp"
 #include "solver/export_vtk.hpp"
 #include "solver/ibm.hpp"
@@ -88,6 +91,7 @@ int main(int argc, char* argv[])
   SimulationCase& simCase = config.simCase;
   WarmupMode& warmupMode = config.warmupMode;
   GaitNormalization& gaitNormalization = config.gaitNormalization;
+  BodyKinematics& bodyKinematics = config.bodyKinematics;
   T& tailAmpRatioTarget = config.tailAmpRatioTarget;
   T& targetSt = config.targetSt;
   T& referenceU = config.referenceU;
@@ -193,7 +197,8 @@ int main(int argc, char* argv[])
     clout << "ERROR: could not create run output root: " << runsRootDir << std::endl;
     return 1;
   }
-  const std::string baseRunId = makeBaseRunId(p, simCase, runTag);
+  const std::string baseRunId =
+    makeBaseRunId(p, simCase, config.bodyKinematics, runTag);
   const std::string runId = makeUniqueRunId(baseRunId, runsRootDir);
   const std::string runOutDir = runsRootDir + runId + "/";
   const std::string runVtkDir = runOutDir + "vtkData/";
@@ -248,7 +253,9 @@ int main(int argc, char* argv[])
         << " lu  freq=" << p.eelFreq
         << "  lambda=" << p.eelLambda
         << "  geometryKinematics="
-        << geometryKinematicsName(p.geometryKinematics) << std::endl;
+        << geometryKinematicsName(p.geometryKinematics)
+        << "  bodyKinematics="
+        << bodyKinematicsName(bodyKinematics) << std::endl;
   clout << "Warmup: mode=" << warmupModeName(warmupMode)
         << "  nWarmup=" << p.nWarmup << std::endl;
   clout << "Gait normalization: requested=" << gaitNormalizationName(gaitNormalization)
@@ -403,10 +410,16 @@ int main(int argc, char* argv[])
   T& Vy = bodyState.Vy;
   T& omegaZ = bodyState.omegaZ;
 
-  // Body inertial properties (neutrally buoyant).  The centerline length is
-  // used by the gait construction; the capsule tip-to-tip length is the
-  // characteristic body length for mass/inertia/Re diagnostics.
-  BodyInertia bodyInertia = computeBodyInertia(p, 1.0);
+  // Body inertial properties.  The centerline length is used by the gait
+  // construction; the capsule tip-to-tip length is the characteristic body
+  // length for mass/inertia/Re diagnostics.  Density now comes from the
+  // selected body material (Dragon Skin 20 by default).
+  const MaterialProperties material = resolveMaterialProperties(p);
+  const PlanarRodSectionEstimate rodSection =
+    estimatePlanarRodSection(p, material);
+  const SoftBackboneConfig softBackbone =
+    makeSoftBackboneConfig(p, rodSection, std::max(2, p.nSpine - 1));
+  BodyInertia bodyInertia = computeBodyInertia(p, material.densityRatio);
   T bodyCenterlineLength = bodyInertia.bodyCenterlineLength;
   T bodyLength = bodyInertia.bodyLength;
   T bodyWidth  = bodyInertia.bodyWidth;
@@ -465,6 +478,59 @@ int main(int argc, char* argv[])
   clout << "Body: centerlineL=" << bodyCenterlineLength
         << "  totalL=" << bodyLength << "  W=" << bodyWidth
         << "  capsuleArea=" << bodyArea << std::endl;
+  clout << "Material: " << material.name
+        << "  rhoBodyRatio=" << material.densityRatio
+        << "  rhoBodySI=" << material.densityKgM3 << " kg/m^3"
+        << "  E=" << material.youngModulusPa << " Pa"
+        << "  nu=" << material.poissonRatio
+        << "  G=" << material.shearModulusPa << " Pa"
+        << "  K=" << material.bulkModulusPa << " Pa"
+        << "  dampingRatio=" << material.dampingRatio << std::endl;
+  if (rodSection.valid) {
+    clout << "Soft rod estimate: physicalL=" << rodSection.physicalLengthM
+          << " m  width=" << rodSection.widthM
+          << " m  thickness=" << rodSection.thicknessM
+          << " m  EI=" << rodSection.bendingStiffnessNm2
+          << " N*m^2  EA=" << rodSection.axialStiffnessN
+          << " N  m/L=" << rodSection.massPerLengthKgM
+          << " kg/m" << std::endl;
+  } else {
+    clout << "Soft rod estimate: inactive. Set --physicalBodyLengthM=<m> "
+          << "to map Dragon Skin 20 stiffness to the lattice geometry."
+          << std::endl;
+  }
+  if (softBackbone.valid) {
+    const T probePeriod =
+      (p.eelFreq > T(1e-12)) ? T(0.25) / p.eelFreq : T(0);
+    const T probeTime = p.restTime + p.rampTime + probePeriod;
+    const SoftBackboneCurvatureProfile preferredBackbone =
+      preferredBackboneCurvatureWave(p, softBackbone, probeTime, p.dtAnim);
+    const SoftBackboneState straightBackbone =
+      makeStraightBackboneState(softBackbone.nSegments);
+    const SoftBackboneTorqueResult straightBackboneTorque =
+      computeSoftBackboneTorques(softBackbone, straightBackbone,
+                                 preferredBackbone);
+    clout << "Soft backbone foundation: segments=" << softBackbone.nSegments
+          << "  centerlineL=" << softBackbone.centerlineLengthM
+          << " m  ds=" << softBackbone.dsM
+          << " m  Ktheta=" << softBackbone.jointAngleStiffnessNm
+          << " N*m/rad  Ctheta=" << softBackbone.jointAngleDampingNms
+          << " N*m*s/rad  maxPreferredCurvature="
+          << preferredBackbone.maxAbsCurvature
+          << " 1/m  maxStraightMoment="
+          << straightBackboneTorque.maxAbsJointMomentNm
+          << " N*m" << std::endl;
+  } else {
+    clout << "Soft backbone foundation: inactive; rod estimate is invalid."
+          << std::endl;
+  }
+  if (bodyKinematics == BodyKinematics::SoftBackbone &&
+      !softBackbone.valid) {
+    clout << "ERROR: --bodyKinematics=soft_backbone needs a valid "
+          << "Dragon Skin soft-rod estimate. Check --physicalBodyLengthM, "
+          << "--bodyThicknessM, and material properties." << std::endl;
+    return 1;
+  }
   clout << "mass=" << mass << "  Ibody=" << Ibody << std::endl;
   clout << "addedMassFrac=" << p.addedMassFrac
         << "  mAdded_surge_theory=" << mAddedSurge_theory
@@ -517,9 +583,12 @@ int main(int argc, char* argv[])
   };
 
   bool runtimeDomainClampWarned = false;
+  const T markerDomainGuard = T(2);
+  const T bodyClampSafety = T(2);
   auto clampBodyBeforeMarkers = [&]() -> bool {
     const T halfLength = 0.5 * bodyLength;
-    const T halfWidthWithWave = p.bodyRadius + tailAmpLU + T(2);
+    const T halfWidthWithWave = p.bodyRadius + tailAmpLU
+                              + markerDomainGuard + bodyClampSafety;
     const T c = std::abs(std::cos(theta));
     const T s = std::abs(std::sin(theta));
     const T xMargin = c * halfLength + s * halfWidthWithWave;
@@ -567,8 +636,10 @@ int main(int argc, char* argv[])
       minY = std::min(minY, mk.y[m]);
       maxY = std::max(maxY, mk.y[m]);
     }
-    const bool ok = (minX >= T(2) && maxX <= T(nx - 3) &&
-                     minY >= T(2) && maxY <= T(ny - 3));
+    const bool ok = (minX >= markerDomainGuard &&
+                     maxX <= T(nx - 1) - markerDomainGuard &&
+                     minY >= markerDomainGuard &&
+                     maxY <= T(ny - 1) - markerDomainGuard);
     if (!ok) {
       clout << "ERROR: IBM markers left the lattice during " << context
             << ". bounds x=[" << minX << ", " << maxX << "] y=["
@@ -584,9 +655,15 @@ int main(int argc, char* argv[])
     applyModeDefinitionState();
     if (!clampBodyBeforeMarkers()) return false;
     applyModeDefinitionState();
-    buildLagrangianMarkers(
-      p, t, Vx, Vy, omegaZ, xCm, yCm, theta, dtLbm,
-      deformationAmpScale(), target);
+    if (bodyKinematics == BodyKinematics::SoftBackbone) {
+      buildLagrangianMarkersFromSoftBackbone(
+        p, softBackbone, t, Vx, Vy, omegaZ, xCm, yCm, theta, dtLbm,
+        deformationAmpScale(), target);
+    } else {
+      buildLagrangianMarkers(
+        p, t, Vx, Vy, omegaZ, xCm, yCm, theta, dtLbm,
+        deformationAmpScale(), target);
+    }
     return markersInDomain(target, context);
   };
 
@@ -1043,6 +1120,7 @@ int main(int argc, char* argv[])
   summaryInput.warmupMode = warmupMode;
   summaryInput.gaitNormalization = effectiveGaitNormalization;
   summaryInput.wallBoundary = wallBoundary;
+  summaryInput.bodyKinematics = bodyKinematics;
   summaryInput.initialPlacementClamped = clampAudit.initialPlacementClamped;
   summaryInput.initialPlacementClampCount = clampAudit.initialPlacementClampCount;
   summaryInput.runtimeDomainClampHit = clampAudit.runtimeDomainClampHit;
@@ -1083,6 +1161,7 @@ int main(int argc, char* argv[])
   verificationInput.warmupMode = warmupMode;
   verificationInput.gaitNormalization = effectiveGaitNormalization;
   verificationInput.wallBoundary = wallBoundary;
+  verificationInput.bodyKinematics = bodyKinematics;
   verificationInput.initialPlacementClamped = clampAudit.initialPlacementClamped;
   verificationInput.initialPlacementClampCount = clampAudit.initialPlacementClampCount;
   verificationInput.speedClampHit = clampAudit.speedClampHit;
@@ -1165,6 +1244,7 @@ int main(int argc, char* argv[])
   clout << "warmupMode=" << warmupModeName(warmupMode)
         << "  gaitNormalization=" << gaitNormalizationName(effectiveGaitNormalization)
         << "  geometryKinematics=" << geometryKinematicsName(p.geometryKinematics)
+        << "  bodyKinematics=" << bodyKinematicsName(bodyKinematics)
         << "  effectiveEelFreq=" << effectiveEelFreq
         << "  effectiveEelA0=" << effectiveEelA0 << std::endl;
   clout << "IBM(v7): alphaIBM=" << alphaIBM

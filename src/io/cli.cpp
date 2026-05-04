@@ -60,6 +60,16 @@ RunConfig parseCommandLine(int argc, char* argv[], const std::string& baseLogDir
     if (key == "--warnMaxSlip")   config.p.warnMaxSlip = std::stod(val);
     if (key == "--warnMarkerForce") config.p.warnMarkerForce = std::stod(val);
     if (key == "--addedMassFrac") config.p.addedMassFrac = std::stod(val);
+    if (key == "--material" || key == "--bodyMaterial") {
+      config.p.bodyMaterial = parseBodyMaterial(val);
+    }
+    if (key == "--fluidDensityKgM3") config.p.fluidDensityKgM3 = std::stod(val);
+    if (key == "--rhoBodyRatio") config.p.rhoBodyRatioOverride = std::stod(val);
+    if (key == "--youngModulusPa") config.p.youngModulusPaOverride = std::stod(val);
+    if (key == "--poissonRatio") config.p.poissonRatioOverride = std::stod(val);
+    if (key == "--materialDampingRatio") config.p.materialDampingRatio = std::stod(val);
+    if (key == "--physicalBodyLengthM") config.p.physicalBodyLengthM = std::stod(val);
+    if (key == "--bodyThicknessM") config.p.bodyThicknessM = std::stod(val);
     if (key == "--spongeWidth")   config.p.spongeWidth = std::stoi(val);
     if (key == "--spongeStrength")config.p.spongeStrength = std::stod(val);
     if (key == "--nWarmup")       config.p.nWarmup = std::stoi(val);
@@ -67,6 +77,14 @@ RunConfig parseCommandLine(int argc, char* argv[], const std::string& baseLogDir
     if (key == "--gaitNormalization") config.gaitNormalization = parseGaitNormalization(val);
     if (key == "--geometryKinematics" || key == "--kinematics") {
       config.p.geometryKinematics = parseGeometryKinematics(val);
+    }
+    if (key == "--bodyKinematics" || key == "--deformationSource") {
+      config.bodyKinematics = parseBodyKinematics(val);
+    }
+    if (key == "--useSoftBackbone") {
+      config.bodyKinematics = parseBool(val)
+                            ? BodyKinematics::SoftBackbone
+                            : BodyKinematics::PrescribedWave;
     }
     if (key == "--wallBoundary")  config.wallBoundary = parseWallBoundary(val);
     if (key == "--tailAmpRatioTarget") config.tailAmpRatioTarget = std::stod(val);

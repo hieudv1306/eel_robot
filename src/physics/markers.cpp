@@ -40,3 +40,37 @@ void buildLagrangianMarkers(
   }
 }
 
+void buildLagrangianMarkersFromSoftBackbone(
+    const EelParams& p,
+    const SoftBackboneConfig& config,
+    T t, T Vx, T Vy, T omegaZ,
+    T xCm, T yCm, T theta,
+    T dtLbm, T ampRamp,
+    LagrangianMarkers& markers)
+{
+  const SoftBackboneState state =
+    preferredBackboneStateWave(p, config, t, dtLbm, ampRamp);
+  const SoftBackboneState statePlus =
+    preferredBackboneStateWave(p, config, t + dtLbm, dtLbm, ampRamp);
+  const SoftBackboneState stateMinus =
+    preferredBackboneStateWave(p, config, t - dtLbm, dtLbm, ampRamp);
+
+  std::vector<T> globX, globY, vxDef, vyDef, allDs;
+  buildCapsuleGeometryFromBackboneMotion(
+    p, config, state, statePlus, stateMinus,
+    xCm, yCm, theta, globX, globY, vxDef, vyDef, allDs);
+
+  const int n = static_cast<int>(globX.size());
+  markers.resize(n);
+
+  for (int i = 0; i < n; ++i) {
+    markers.x[i]  = globX[i];
+    markers.y[i]  = globY[i];
+    markers.ds[i] = allDs[i];
+
+    T rx = globX[i] - xCm;
+    T ry = globY[i] - yCm;
+    markers.ud[i] = Vx - omegaZ * ry + vxDef[i];
+    markers.vd[i] = Vy + omegaZ * rx + vyDef[i];
+  }
+}

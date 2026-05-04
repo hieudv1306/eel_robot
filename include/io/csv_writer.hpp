@@ -29,6 +29,7 @@ struct SummaryCsvInputs {
   WarmupMode warmupMode = WarmupMode::Rest;
   GaitNormalization gaitNormalization = GaitNormalization::Fixed;
   WallBoundary wallBoundary = WallBoundary::NoSlip;
+  BodyKinematics bodyKinematics = BodyKinematics::PrescribedWave;
   bool initialPlacementClamped = false;
   std::uint64_t initialPlacementClampCount = 0;
   bool runtimeDomainClampHit = false;
@@ -58,6 +59,7 @@ struct VerificationCsvInputs {
   WarmupMode warmupMode = WarmupMode::Rest;
   GaitNormalization gaitNormalization = GaitNormalization::Fixed;
   WallBoundary wallBoundary = WallBoundary::NoSlip;
+  BodyKinematics bodyKinematics = BodyKinematics::PrescribedWave;
   bool initialPlacementClamped = false;
   std::uint64_t initialPlacementClampCount = 0;
   bool speedClampHit = false;

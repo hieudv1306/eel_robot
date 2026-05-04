@@ -1,6 +1,8 @@
 #include "io/csv_writer.hpp"
 
 #include "io/filesystem.hpp"
+#include "physics/material.hpp"
+#include "physics/soft_rod.hpp"
 
 #include <fstream>
 #include <iomanip>
@@ -34,6 +36,9 @@ CsvPathResolution resolveCsvPath(const std::string& requestedPath,
 CsvWriteResult appendArSummaryCsv(const std::string& requestedPath,
                                    const SummaryCsvInputs& in)
 {
+  const MaterialProperties material = resolveMaterialProperties(in.p);
+  const PlanarRodSectionEstimate rodSection =
+    estimatePlanarRodSection(in.p, material);
   const std::string summaryHeader =
     "aspectRatio,bodyAreaTarget,bodyRadius,centerlineLength,totalLength,width,"
     "mass,Ibody,meanU,meanP,meanForwardNetForce,meanLateralForce,"
@@ -50,10 +55,13 @@ CsvWriteResult appendArSummaryCsv(const std::string& requestedPath,
     "maxResidualSlip,meanConstraintPower,meanRigidBodyPower,"
     "meanDeformationPower,meanAbsConstraintPower,meanAbsRigidBodyPower,"
     "meanAbsDeformationPower,transportEfficiencyDef,cotDef,wallBoundary,"
-    "geometryKinematics,ibmCoupling";
+    "geometryKinematics,bodyKinematics,bodyMaterial,rhoBodyRatio,youngModulusPa,"
+    "poissonRatio,shearModulusPa,bulkModulusPa,physicalBodyLengthM,"
+    "rodWidthM,rodThicknessM,rodBendingStiffnessNm2,rodAxialStiffnessN,"
+    "ibmCoupling";
 
   CsvWriteResult result;
-  result.resolution = resolveCsvPath(requestedPath, summaryHeader, "_metrics_v9");
+  result.resolution = resolveCsvPath(requestedPath, summaryHeader, "_metrics_v11");
 
   std::ifstream probe(result.resolution.path);
   const bool writeHeader = !probe.good() || probe.peek() == std::ifstream::traits_type::eof();
@@ -133,6 +141,18 @@ CsvWriteResult appendArSummaryCsv(const std::string& requestedPath,
       << in.steady.cotDef << ","
       << wallBoundaryName(in.wallBoundary) << ","
       << geometryKinematicsName(in.p.geometryKinematics) << ","
+      << bodyKinematicsName(in.bodyKinematics) << ","
+      << material.name << ","
+      << material.densityRatio << ","
+      << material.youngModulusPa << ","
+      << material.poissonRatio << ","
+      << material.shearModulusPa << ","
+      << material.bulkModulusPa << ","
+      << in.p.physicalBodyLengthM << ","
+      << (rodSection.valid ? rodSection.widthM : T(0)) << ","
+      << (rodSection.valid ? rodSection.thicknessM : T(0)) << ","
+      << (rodSection.valid ? rodSection.bendingStiffnessNm2 : T(0)) << ","
+      << (rodSection.valid ? rodSection.axialStiffnessN : T(0)) << ","
       << "sparse_eulerian_mdf" << "\n";
   return result;
 }
@@ -140,6 +160,9 @@ CsvWriteResult appendArSummaryCsv(const std::string& requestedPath,
 CsvWriteResult appendVerificationSummaryCsv(const std::string& requestedPath,
                                              const VerificationCsvInputs& in)
 {
+  const MaterialProperties material = resolveMaterialProperties(in.p);
+  const PlanarRodSectionEstimate rodSection =
+    estimatePlanarRodSection(in.p, material);
   const std::string verificationHeader =
     "run_id,simCase,aspectRatio,bodyAreaTarget,nx,ny,tau,kappa,substeps,"
     "dtAnim,dtLbm,Ttotal,spongeWidth,spongeStrength,addedMassFrac,tCut,"
@@ -159,10 +182,13 @@ CsvWriteResult appendVerificationSummaryCsv(const std::string& requestedPath,
     "maxResidualSlip,meanConstraintPower,meanRigidBodyPower,"
     "meanDeformationPower,meanAbsConstraintPower,meanAbsRigidBodyPower,"
     "meanAbsDeformationPower,transportEfficiencyDef,cotDef,wallBoundary,"
-    "geometryKinematics,ibmCoupling";
+    "geometryKinematics,bodyKinematics,bodyMaterial,rhoBodyRatio,youngModulusPa,"
+    "poissonRatio,shearModulusPa,bulkModulusPa,physicalBodyLengthM,"
+    "rodWidthM,rodThicknessM,rodBendingStiffnessNm2,rodAxialStiffnessN,"
+    "ibmCoupling";
 
   CsvWriteResult result;
-  result.resolution = resolveCsvPath(requestedPath, verificationHeader, "_metrics_v9");
+  result.resolution = resolveCsvPath(requestedPath, verificationHeader, "_metrics_v11");
 
   std::ifstream probe(result.resolution.path);
   const bool writeHeader = !probe.good() || probe.peek() == std::ifstream::traits_type::eof();
@@ -260,6 +286,18 @@ CsvWriteResult appendVerificationSummaryCsv(const std::string& requestedPath,
       << in.steady.cotDef << ","
       << wallBoundaryName(in.wallBoundary) << ","
       << geometryKinematicsName(in.p.geometryKinematics) << ","
+      << bodyKinematicsName(in.bodyKinematics) << ","
+      << material.name << ","
+      << material.densityRatio << ","
+      << material.youngModulusPa << ","
+      << material.poissonRatio << ","
+      << material.shearModulusPa << ","
+      << material.bulkModulusPa << ","
+      << in.p.physicalBodyLengthM << ","
+      << (rodSection.valid ? rodSection.widthM : T(0)) << ","
+      << (rodSection.valid ? rodSection.thicknessM : T(0)) << ","
+      << (rodSection.valid ? rodSection.bendingStiffnessNm2 : T(0)) << ","
+      << (rodSection.valid ? rodSection.axialStiffnessN : T(0)) << ","
       << "sparse_eulerian_mdf" << "\n";
   return result;
 }

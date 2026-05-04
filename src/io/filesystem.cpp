@@ -127,6 +127,7 @@ std::string appendSuffixBeforeExtension(const std::string& path,
 }
 
 std::string makeBaseRunId(const EelParams& p, SimulationCase simCase,
+                          BodyKinematics bodyKinematics,
                           const std::string& runTag)
 {
   std::string runId = std::string("case_") + simulationCaseName(simCase)
@@ -135,7 +136,14 @@ std::string makeBaseRunId(const EelParams& p, SimulationCase simCase,
                     + "_kap" + formatValueForRunId(p.kappa)
                     + "_sub" + std::to_string(p.substeps)
                     + "_kin_" + sanitizePathToken(
-                        geometryKinematicsName(p.geometryKinematics));
+                        geometryKinematicsName(p.geometryKinematics))
+                    + "_body_" + sanitizePathToken(
+                        bodyKinematicsName(bodyKinematics))
+                    + "_mat_" + sanitizePathToken(
+                        bodyMaterialName(p.bodyMaterial));
+  if (p.rhoBodyRatioOverride > T(0)) {
+    runId += "_rho" + formatValueForRunId(p.rhoBodyRatioOverride);
+  }
   runId += "_N" + std::to_string(p.nx) + "x" + std::to_string(p.ny);
   if (!runTag.empty()) {
     runId += "_" + sanitizePathToken(runTag);

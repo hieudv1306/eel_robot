@@ -13,5 +13,7 @@ bool eelEnsureDirectoryTree(const std::string& rawPath);
 std::string sanitizePathToken(const std::string& raw);
 std::string formatValueForRunId(T value);
 std::string appendSuffixBeforeExtension(const std::string& path, const std::string& suffix);
-std::string makeBaseRunId(const EelParams& p, SimulationCase simCase, const std::string& runTag);
+std::string makeBaseRunId(const EelParams& p, SimulationCase simCase,
+                          BodyKinematics bodyKinematics,
+                          const std::string& runTag);
 std::string makeUniqueRunId(const std::string& baseRunId, const std::string& runsRootDir);

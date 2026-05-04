@@ -1,5 +1,7 @@
 #include "core/params.hpp"
 #include "physics/geometry.hpp"
+#include "physics/material.hpp"
+#include "physics/soft_rod.hpp"
 
 #include <algorithm>
 #include <cassert>
@@ -80,4 +82,39 @@ int main() {
   assert(std::abs(dot) < 1e-12);
   assert(std::abs(eNorm - 1.0) < 1e-12);
   assert(std::abs(nNorm - 1.0) < 1e-12);
+
+  pInext.physicalBodyLengthM = 0.30;
+  pInext.bodyThicknessM = 0.02;
+  const MaterialProperties material = resolveMaterialProperties(pInext);
+  const PlanarRodSectionEstimate rod =
+    estimatePlanarRodSection(pInext, material);
+  const SoftBackboneConfig backbone =
+    makeSoftBackboneConfig(pInext, rod, pInext.nSpine - 1);
+  assert(backbone.valid);
+  const SoftBackboneState preferred =
+    preferredBackboneStateWave(pInext, backbone, 2.0, dt);
+
+  std::vector<T> xb, yb, dsb;
+  buildCapsuleGeometryFromBackboneState(
+    pInext, backbone, preferred, 100.0, 60.0, 0.0, xb, yb, dsb);
+  assert(!xb.empty());
+  assert(xb.size() == yb.size());
+  assert(xb.size() == dsb.size());
+
+  std::vector<T> xpB, ypB, uxB, uyB, dsMotionB;
+  const SoftBackboneState preferredPlus =
+    preferredBackboneStateWave(pInext, backbone, 2.0 + dt, dt);
+  const SoftBackboneState preferredMinus =
+    preferredBackboneStateWave(pInext, backbone, 2.0 - dt, dt);
+  buildCapsuleGeometryFromBackboneMotion(
+    pInext, backbone, preferred, preferredPlus, preferredMinus,
+    100.0, 60.0, 0.0, xpB, ypB, uxB, uyB, dsMotionB);
+  assert(xpB.size() == xb.size());
+  assert(xpB.size() == uxB.size());
+  T maxSoftSpeed = 0.0;
+  for (size_t i = 0; i < uxB.size(); ++i) {
+    maxSoftSpeed = std::max(maxSoftSpeed, std::sqrt(uxB[i] * uxB[i] +
+                                                    uyB[i] * uyB[i]));
+  }
+  assert(maxSoftSpeed > 1e-8);
 }

@@ -39,6 +39,18 @@ struct EelParams {
 
   T      addedMassFrac = 0.0;
 
+  BodyMaterial bodyMaterial = BodyMaterial::DragonSkin20;
+  T      fluidDensityKgM3 = 1000.0;
+  T      rhoBodyRatioOverride = -1.0;
+  T      youngModulusPaOverride = -1.0;
+  T      poissonRatioOverride = -1.0;
+  T      materialDampingRatio = 0.05;
+  // SI length scale used for soft-rod stiffness diagnostics.  The LBM solver
+  // still advances in lattice units; override these when the real robot size
+  // differs from the current Dragon Skin 20 baseline.
+  T      physicalBodyLengthM = 0.30;
+  T      bodyThicknessM = 0.02;
+
   int    spongeWidth    = 80;
   T      spongeStrength = 0.05;
 

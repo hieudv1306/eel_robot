@@ -2,6 +2,7 @@
 
 #include "core/params.hpp"
 #include "core/types.hpp"
+#include "physics/soft_backbone.hpp"
 
 #include <vector>
 
@@ -17,6 +18,14 @@ struct LagrangianMarkers {
 
 void buildLagrangianMarkers(
     const EelParams& p,
+    T t, T Vx, T Vy, T omegaZ,
+    T xCm, T yCm, T theta,
+    T dtLbm, T ampRamp,
+    LagrangianMarkers& markers);
+
+void buildLagrangianMarkersFromSoftBackbone(
+    const EelParams& p,
+    const SoftBackboneConfig& config,
     T t, T Vx, T Vy, T omegaZ,
     T xCm, T yCm, T theta,
     T dtLbm, T ampRamp,

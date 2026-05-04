@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <vector>
 
 // ============================================================
@@ -191,6 +192,151 @@ void buildCapsulePositionFrame(
   }
 }
 
+void buildCapsulePositionFrameFromBackbone(
+    const EelParams& p,
+    const SoftBackboneConfig& config,
+    const SoftBackboneState& state,
+    T xCm, T yCm, T theta,
+    std::vector<T>& globX, std::vector<T>& globY,
+    std::vector<T>& allDs)
+{
+  const int nSeg = config.nSegments;
+  if (!config.valid || nSeg < 1 ||
+      static_cast<int>(state.theta.size()) != nSeg) {
+    globX.clear();
+    globY.clear();
+    allDs.clear();
+    return;
+  }
+
+  const T scaleToLU =
+    (config.centerlineLengthM > T(0))
+      ? p.centerlineLengthLU() / config.centerlineLengthM : T(0);
+  const T dsSpine = config.dsM * scaleToLU;
+  if (!(dsSpine > T(0))) {
+    globX.clear();
+    globY.clear();
+    allDs.clear();
+    return;
+  }
+
+  const int nNodes = nSeg + 1;
+  std::vector<T> cxL(nNodes, T(0));
+  std::vector<T> cyL(nNodes, T(0));
+  std::vector<T> segTx(nSeg), segTy(nSeg);
+  for (int i = 0; i < nSeg; ++i) {
+    segTx[i] = std::cos(state.theta[i]);
+    segTy[i] = std::sin(state.theta[i]);
+    cxL[i + 1] = cxL[i] + dsSpine * segTx[i];
+    cyL[i + 1] = cyL[i] + dsSpine * segTy[i];
+  }
+
+  const T midSeg = T(0.5) * T(nSeg);
+  const int iMid0 = static_cast<int>(std::floor(midSeg));
+  const int iMid1 = std::min(iMid0 + 1, nNodes - 1);
+  const T midFrac = midSeg - T(iMid0);
+  const T xMid = cxL[iMid0] * (T(1) - midFrac) + cxL[iMid1] * midFrac;
+  const T yMid = cyL[iMid0] * (T(1) - midFrac) + cyL[iMid1] * midFrac;
+  for (int i = 0; i < nNodes; ++i) {
+    cxL[i] -= xMid;
+    cyL[i] -= yMid;
+  }
+
+  std::vector<T> txV(nNodes), tyV(nNodes), nxN(nNodes), nyN(nNodes);
+  for (int i = 0; i < nNodes; ++i) {
+    T tx = T(0);
+    T ty = T(0);
+    if (i == 0) {
+      tx = segTx[0];
+      ty = segTy[0];
+    } else if (i == nNodes - 1) {
+      tx = segTx[nSeg - 1];
+      ty = segTy[nSeg - 1];
+    } else {
+      tx = segTx[i - 1] + segTx[i];
+      ty = segTy[i - 1] + segTy[i];
+      const T len = std::sqrt(tx * tx + ty * ty);
+      if (len > T(1e-12)) {
+        tx /= len;
+        ty /= len;
+      } else {
+        tx = segTx[i];
+        ty = segTy[i];
+      }
+    }
+    txV[i] = tx;
+    tyV[i] = ty;
+    nxN[i] = -ty;
+    nyN[i] =  tx;
+  }
+
+  const T r = p.bodyRadius;
+  std::vector<T> upperXL(nNodes), upperYL(nNodes), lowerXL(nNodes), lowerYL(nNodes);
+  for (int i = 0; i < nNodes; ++i) {
+    upperXL[i] = cxL[i] + r * nxN[i];
+    upperYL[i] = cyL[i] + r * nyN[i];
+    lowerXL[i] = cxL[i] - r * nxN[i];
+    lowerYL[i] = cyL[i] - r * nyN[i];
+  }
+
+  const int nHeadCap = std::max(static_cast<int>(std::ceil(M_PI * r / dsSpine)), 8);
+  const int nTailCap = std::max(static_cast<int>(std::ceil(M_PI * r / dsSpine)), 8);
+  const T dsHeadCap = M_PI * r / nHeadCap;
+  const T dsTailCap = M_PI * r / nTailCap;
+
+  std::vector<T> headCapX(nHeadCap + 1), headCapY(nHeadCap + 1);
+  for (int i = 0; i <= nHeadCap; ++i) {
+    const T phi = M_PI * i / nHeadCap;
+    headCapX[i] = cxL[0] + r * (-std::cos(phi) * nxN[0] - std::sin(phi) * txV[0]);
+    headCapY[i] = cyL[0] + r * (-std::cos(phi) * nyN[0] - std::sin(phi) * tyV[0]);
+  }
+  std::vector<T> tailCapX(nTailCap + 1), tailCapY(nTailCap + 1);
+  for (int i = 0; i <= nTailCap; ++i) {
+    const T phi = M_PI * i / nTailCap;
+    tailCapX[i] = cxL[nNodes - 1] + r * (std::cos(phi) * nxN[nNodes - 1] + std::sin(phi) * txV[nNodes - 1]);
+    tailCapY[i] = cyL[nNodes - 1] + r * (std::cos(phi) * nyN[nNodes - 1] + std::sin(phi) * tyV[nNodes - 1]);
+  }
+
+  const int nTotal = nNodes + (nTailCap - 1) + nNodes + (nHeadCap - 1);
+  std::vector<T> locX(nTotal), locY(nTotal);
+  allDs.resize(nTotal);
+
+  int idx = 0;
+  for (int i = 0; i < nNodes; ++i) {
+    locX[idx] = upperXL[i];
+    locY[idx] = upperYL[i];
+    allDs[idx] = dsSpine;
+    ++idx;
+  }
+  for (int i = 1; i < nTailCap; ++i) {
+    locX[idx] = tailCapX[i];
+    locY[idx] = tailCapY[i];
+    allDs[idx] = dsTailCap;
+    ++idx;
+  }
+  for (int i = nNodes - 1; i >= 0; --i) {
+    locX[idx] = lowerXL[i];
+    locY[idx] = lowerYL[i];
+    allDs[idx] = dsSpine;
+    ++idx;
+  }
+  for (int i = 1; i < nHeadCap; ++i) {
+    locX[idx] = headCapX[i];
+    locY[idx] = headCapY[i];
+    allDs[idx] = dsHeadCap;
+    ++idx;
+  }
+
+  const T cosT = std::cos(theta);
+  const T sinT = std::sin(theta);
+  globX.resize(nTotal);
+  globY.resize(nTotal);
+  for (int i = 0; i < nTotal; ++i) {
+    globX[i] = cosT * locX[i] - sinT * locY[i] + xCm;
+    globY[i] = sinT * locX[i] + cosT * locY[i] + yCm;
+  }
+}
+
 }  // namespace
 
 void buildCapsuleGeometry(
@@ -222,6 +368,56 @@ void buildCapsuleGeometry(
   buildCapsulePositionFrame(p, t - dtLbm, xCm, yCm, theta, ampRamp,
                             xMinus, yMinus, dsMinus);
 
+  if (xPlus.size() != globX.size() || xMinus.size() != globX.size() ||
+      yPlus.size() != globY.size() || yMinus.size() != globY.size()) {
+    return;
+  }
+
+  for (int i = 0; i < nTotal; ++i) {
+    vxDefGlob[i] = T(0.5) * (xPlus[i] - xMinus[i]);
+    vyDefGlob[i] = T(0.5) * (yPlus[i] - yMinus[i]);
+  }
+}
+
+void buildCapsuleGeometryFromBackboneState(
+    const EelParams& p,
+    const SoftBackboneConfig& config,
+    const SoftBackboneState& state,
+    T xCm, T yCm, T theta,
+    std::vector<T>& globX, std::vector<T>& globY,
+    std::vector<T>& allDs)
+{
+  buildCapsulePositionFrameFromBackbone(
+    p, config, state, xCm, yCm, theta, globX, globY, allDs);
+}
+
+void buildCapsuleGeometryFromBackboneMotion(
+    const EelParams& p,
+    const SoftBackboneConfig& config,
+    const SoftBackboneState& state,
+    const SoftBackboneState& statePlus,
+    const SoftBackboneState& stateMinus,
+    T xCm, T yCm, T theta,
+    std::vector<T>& globX, std::vector<T>& globY,
+    std::vector<T>& vxDefGlob, std::vector<T>& vyDefGlob,
+    std::vector<T>& allDs)
+{
+  buildCapsulePositionFrameFromBackbone(
+    p, config, state, xCm, yCm, theta, globX, globY, allDs);
+
+  const int nTotal = static_cast<int>(globX.size());
+  vxDefGlob.assign(nTotal, T(0));
+  vyDefGlob.assign(nTotal, T(0));
+  if (nTotal == 0) {
+    return;
+  }
+
+  std::vector<T> xPlus, yPlus, dsPlus;
+  std::vector<T> xMinus, yMinus, dsMinus;
+  buildCapsulePositionFrameFromBackbone(
+    p, config, statePlus, xCm, yCm, theta, xPlus, yPlus, dsPlus);
+  buildCapsulePositionFrameFromBackbone(
+    p, config, stateMinus, xCm, yCm, theta, xMinus, yMinus, dsMinus);
   if (xPlus.size() != globX.size() || xMinus.size() != globX.size() ||
       yPlus.size() != globY.size() || yMinus.size() != globY.size()) {
     return;
