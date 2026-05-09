@@ -20,6 +20,10 @@ struct RunConfig {
   T softBackboneRelaxationTime = 0.05;
   T softBackboneFluidTorqueScale = 1.0;
   T softBackboneMaxAngleStep = 0.02;
+  bool softBackboneAbortOnInstability = true;
+  T softBackboneAbortMeanSlip = 0.5;
+  T softBackboneAbortMaxSlip = 50.0;
+  int softBackboneAbortSaturatedFrames = 3;
   T alphaIBM = 1.0;
   int ibmIterations = 1;
   bool legacyKappaInputUsed = false;

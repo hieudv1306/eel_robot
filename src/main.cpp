@@ -549,7 +549,18 @@ int main(int argc, char* argv[])
           << config.softBackboneFluidTorqueScale
           << "  maxAngleStep="
           << config.softBackboneMaxAngleStep
-          << " rad/step" << std::endl;
+          << " rad/step";
+    if (softBackboneDynamics) {
+      clout << "  abortOnInstability="
+            << (config.softBackboneAbortOnInstability ? 1 : 0)
+            << "  abortMeanSlip="
+            << config.softBackboneAbortMeanSlip
+            << "  abortMaxSlip="
+            << config.softBackboneAbortMaxSlip
+            << "  abortSaturatedFrames="
+            << config.softBackboneAbortSaturatedFrames;
+    }
+    clout << std::endl;
   }
   clout << "mass=" << mass << "  Ibody=" << Ibody << std::endl;
   clout << "addedMassFrac=" << p.addedMassFrac
@@ -807,6 +818,7 @@ int main(int argc, char* argv[])
   // 0.05 leaves a small safety margin without clipping ordinary low-speed runs.
   T maxBodyTranslationSpeedLat = 0.05;
   T maxBodyYawRateLat = 0.005;
+  int softBackboneSaturatedFrameCount = 0;
 
   for (int frame = 0; frame < nFrames; ++frame) {
     T tStart = frame * p.dtAnim;
@@ -1108,6 +1120,58 @@ int main(int argc, char* argv[])
       clout << "WARNING: marker force exceeded threshold at frame " << frame
             << "  maxMarkerForce=" << maxMarkerForceFrame
             << "  threshold=" << p.warnMarkerForce << std::endl;
+    }
+
+    if (softBackboneDynamics &&
+        bodyKinematics == BodyKinematics::SoftBackbone &&
+        config.softBackboneAbortOnInstability) {
+      const T stepLimit = config.softBackboneMaxAngleStep;
+      const bool saturatedStep =
+        (stepLimit > T(0)) &&
+        std::isfinite(maxSoftAngleStepFrame) &&
+        maxSoftAngleStepFrame >= T(0.95) * stepLimit;
+      softBackboneSaturatedFrameCount =
+        saturatedStep ? (softBackboneSaturatedFrameCount + 1) : 0;
+
+      const bool nonFiniteDiagnostics =
+        !std::isfinite(meanSlipFrame) ||
+        !std::isfinite(maxSlipFrame) ||
+        !std::isfinite(meanSoftAngleStepFrame) ||
+        !std::isfinite(maxSoftAngleStepFrame) ||
+        !std::isfinite(meanSoftFluidTorqueFrame) ||
+        !std::isfinite(maxSoftFluidTorqueFrame);
+      const bool excessiveSlip =
+        (config.softBackboneAbortMeanSlip > T(0) &&
+         meanSlipFrame > config.softBackboneAbortMeanSlip) ||
+        (config.softBackboneAbortMaxSlip > T(0) &&
+         maxSlipFrame > config.softBackboneAbortMaxSlip);
+      const bool repeatedSaturation =
+        softBackboneSaturatedFrameCount >=
+        config.softBackboneAbortSaturatedFrames;
+
+      if (nonFiniteDiagnostics || excessiveSlip || repeatedSaturation) {
+        clout << "ERROR: soft-backbone dynamics instability guard triggered "
+              << "at frame " << frame
+              << "  t=" << tFrame
+              << "  meanSlip=" << meanSlipFrame
+              << "  maxSlip=" << maxSlipFrame
+              << "  meanSoftFluidTorqueNm=" << meanSoftFluidTorqueFrame
+              << "  maxSoftFluidTorqueNm=" << maxSoftFluidTorqueFrame
+              << "  meanSoftAngleStep=" << meanSoftAngleStepFrame
+              << "  maxSoftAngleStep=" << maxSoftAngleStepFrame
+              << "  saturatedFrames="
+              << softBackboneSaturatedFrameCount
+              << "  limits(meanSlip="
+              << config.softBackboneAbortMeanSlip
+              << ", maxSlip="
+              << config.softBackboneAbortMaxSlip
+              << ", saturatedFrames="
+              << config.softBackboneAbortSaturatedFrames
+              << "). Reduce --softBackboneFluidTorqueScale, increase "
+              << "--rampTime, or lower dtLbm via more --substeps."
+              << std::endl;
+        return 2;
+      }
     }
 
     // Ensure exported fields are synchronized with the latest streamed state.

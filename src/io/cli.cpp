@@ -38,6 +38,8 @@ RunConfig parseCommandLine(int argc, char* argv[], const std::string& baseLogDir
     if (key == "--eelFreq")       config.p.eelFreq = std::stod(val);
     if (key == "--eelLambda")     config.p.eelLambda = std::stod(val);
     if (key == "--eelA0")         config.p.eelA0 = std::stod(val);
+    if (key == "--restTime")      config.p.restTime = std::stod(val);
+    if (key == "--rampTime")      config.p.rampTime = std::stod(val);
     if (key == "--waveDirection" || key == "--gaitDirection") {
       config.p.waveDirection = parseWaveDirection(val);
     }
@@ -104,6 +106,19 @@ RunConfig parseCommandLine(int argc, char* argv[], const std::string& baseLogDir
     }
     if (key == "--softBackboneMaxAngleStep") {
       config.softBackboneMaxAngleStep = std::stod(val);
+    }
+    if (key == "--softBackboneAbortOnInstability") {
+      config.softBackboneAbortOnInstability = parseBool(val);
+    }
+    if (key == "--softBackboneAbortMeanSlip") {
+      config.softBackboneAbortMeanSlip = std::stod(val);
+    }
+    if (key == "--softBackboneAbortMaxSlip") {
+      config.softBackboneAbortMaxSlip = std::stod(val);
+    }
+    if (key == "--softBackboneAbortSaturatedFrames") {
+      config.softBackboneAbortSaturatedFrames =
+        std::max(1, std::stoi(val));
     }
     if (key == "--wallBoundary")  config.wallBoundary = parseWallBoundary(val);
     if (key == "--tailAmpRatioTarget") config.tailAmpRatioTarget = std::stod(val);

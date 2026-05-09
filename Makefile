@@ -39,6 +39,16 @@ OBJ_FILES := $(SRC_FILES:.cpp=.o)
 DEP_FILES := $(SRC_FILES:.cpp=.d)
 INCLUDE_FLAGS := $(addprefix -I,$(INCLUDE_DIRS))
 
+TEST_DIR := tmp/test_bins
+TEST_CXXFLAGS := $(CXXFLAGS) -Iinclude
+TEST_HEADERS := $(wildcard include/core/*.hpp include/physics/*.hpp)
+TEST_BINS := \
+	$(TEST_DIR)/test_gait \
+	$(TEST_DIR)/test_material \
+	$(TEST_DIR)/test_metrics \
+	$(TEST_DIR)/test_soft_backbone \
+	$(TEST_DIR)/test_geometry
+
 all: dependencies core $(EXAMPLE)
 
 core:
@@ -60,6 +70,31 @@ onlysample: $(EXAMPLE)
 run: $(EXAMPLE)
 	./$(EXAMPLE)
 
+$(TEST_DIR):
+	mkdir -p $@
+
+$(TEST_DIR)/test_gait: tests/test_gait.cpp src/physics/gait.cpp $(TEST_HEADERS) | $(TEST_DIR)
+	$(CXX) $(TEST_CXXFLAGS) -o $@ $(filter %.cpp,$^)
+
+$(TEST_DIR)/test_material: tests/test_material.cpp src/core/params.cpp src/physics/material.cpp src/physics/soft_rod.cpp $(TEST_HEADERS) | $(TEST_DIR)
+	$(CXX) $(TEST_CXXFLAGS) -o $@ $(filter %.cpp,$^)
+
+$(TEST_DIR)/test_metrics: tests/test_metrics.cpp src/physics/diagnostics.cpp $(TEST_HEADERS) | $(TEST_DIR)
+	$(CXX) $(TEST_CXXFLAGS) -o $@ $(filter %.cpp,$^)
+
+$(TEST_DIR)/test_soft_backbone: tests/test_soft_backbone.cpp src/core/params.cpp src/physics/gait.cpp src/physics/material.cpp src/physics/soft_rod.cpp src/physics/soft_backbone.cpp $(TEST_HEADERS) | $(TEST_DIR)
+	$(CXX) $(TEST_CXXFLAGS) -o $@ $(filter %.cpp,$^)
+
+$(TEST_DIR)/test_geometry: tests/test_geometry.cpp src/core/params.cpp src/physics/gait.cpp src/physics/geometry.cpp src/physics/markers.cpp src/physics/material.cpp src/physics/soft_rod.cpp src/physics/soft_backbone.cpp $(TEST_HEADERS) | $(TEST_DIR)
+	$(CXX) $(TEST_CXXFLAGS) -o $@ $(filter %.cpp,$^)
+
+.PHONY: test
+test: $(TEST_BINS)
+	@set -e; for test_bin in $(TEST_BINS); do \
+		echo "Running $$test_bin"; \
+		$$test_bin; \
+	done
+
 .PHONY: clean-tmp
 clean-tmp:
 	rm -f tmp/*.* tmp/vtkData/*.* tmp/vtkData/data/*.* tmp/imageData/*.* tmp/imageData/data/*.* tmp/gnuplotData/*.* tmp/gnuplotData/data/*.*
@@ -71,5 +106,6 @@ clean-core:
 .PHONY: clean
 clean: clean-tmp
 	rm -f $(OBJ_FILES) $(DEP_FILES) $(EXAMPLE)
+	rm -rf $(TEST_DIR)
 
 -include $(DEP_FILES)

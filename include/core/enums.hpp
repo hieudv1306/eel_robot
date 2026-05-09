@@ -15,7 +15,9 @@ inline RunMode parseRunMode(const std::string& s) {
 enum class StudyMode { Standard, Verification };
 
 inline StudyMode parseStudyMode(const std::string& s) {
-  if (s == "verification") return StudyMode::Verification;
+  if (s == "verification" || s == "ar_sweep" || s == "sweep") {
+    return StudyMode::Verification;
+  }
   return StudyMode::Standard;
 }
 

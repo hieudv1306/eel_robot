@@ -13,14 +13,15 @@ def main() -> int:
     ap.add_argument("--body-area", type=float, default=650.0)
     ap.add_argument("--ttotal", type=float, default=0.08)
     ap.add_argument("--substeps", type=int, default=2)
-    ap.add_argument("--summary-csv", default="tmp/ar_sweep_metrics_v6.csv")
-    ap.add_argument("--sensitivity-csv", default="tmp/ar_sweep_sensitivity_metrics_v6.csv")
+    ap.add_argument("--summary-csv", default="tmp/ar_sweep_metrics_v13.csv")
+    ap.add_argument("--sensitivity-csv", default="tmp/ar_sweep_sensitivity_metrics_v13.csv")
     ap.add_argument("--tag-prefix", default="ar_sweep")
     ap.add_argument("extra", nargs=argparse.REMAINDER)
     args = ap.parse_args()
 
     Path(args.summary_csv).parent.mkdir(parents=True, exist_ok=True)
     Path(args.sensitivity_csv).parent.mkdir(parents=True, exist_ok=True)
+    extra_args = args.extra[1:] if args.extra[:1] == ["--"] else args.extra
 
     for ar in args.aspect_ratio:
         tag = f"{args.tag_prefix}_AR{ar:g}".replace(".", "p")
@@ -35,13 +36,13 @@ def main() -> int:
             f"--substeps={args.substeps}",
             "--nWarmup=0",
             "--tCut=0",
-            "--studyMode=ar_sweep",
+            "--studyMode=verification",
             "--mode=preview",
             f"--runTag={tag}",
             f"--summaryCsv={args.summary_csv}",
             f"--sensitivityCsv={args.sensitivity_csv}",
         ]
-        cmd.extend(args.extra)
+        cmd.extend(extra_args)
         print("+", " ".join(cmd), flush=True)
         subprocess.run(cmd, check=True)
     return 0

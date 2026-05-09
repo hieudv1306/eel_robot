@@ -9,6 +9,12 @@ Refactored OpenLB eel swimmer sample.  The executable name remains
 make onlysample -j4
 ```
 
+Run the pure-C++ regression checks:
+
+```sh
+make test
+```
+
 ## Verification Smoke
 
 ```sh
@@ -19,6 +25,29 @@ make onlysample -j4
   --summaryCsv=tmp/smoke_ar.csv \
   --sensitivityCsv=tmp/smoke_sensitivity.csv
 ```
+
+## Aspect-Ratio Sweeps
+
+Use the sweep helper for light, CSV-only verification runs.  It passes
+`--studyMode=verification`, so VTK/body snapshots are suppressed while the
+solver physics and update order stay unchanged.
+
+```sh
+python3 scripts/run_ar_sweep.py --aspect-ratio 7 9 11 \
+  --nx=600 --ny=180 --ttotal=12 --substeps=40 \
+  --body-area=1078.5398163397449 --tag-prefix=soft_ar \
+  -- --case=surge_only --wallBoundary=freeslip \
+  --bodyKinematics=soft_backbone \
+  --geometryKinematics=inextensible_wave \
+  --waveDirection=tail_to_head \
+  --softBackboneDynamics=true \
+  --softBackboneFluidTorqueScale=0.1 \
+  --ibmIterations=2 --tCut=4
+```
+
+Rank shape runs primarily by `CoT`, `hydroCost`, `transportEfficiencyDef`,
+and `meanUstar`.  Treat `etaNetForceDiagnostic` as a consistency diagnostic,
+not a propulsion-efficiency metric.
 
 ## Material / Soft-Rod Foundation
 
@@ -82,8 +111,9 @@ integrators selected by `--softBackboneIntegrator`:
 ./11_lbm_eel_3dof --bodyKinematics=soft_backbone \
   --softBackboneDynamics=true \
   --softBackboneIntegrator=implicit \
+  --rampTime=3.0 \
   --softBackboneRelaxationTime=0.05 \
-  --softBackboneFluidTorqueScale=1.0 \
+  --softBackboneFluidTorqueScale=0.001 \
   --softBackboneMaxAngleStep=0.02
 ```
 
@@ -91,11 +121,15 @@ The history and summary CSVs include the coupling settings plus
 `meanSoftFluidTorqueNm`, `maxSoftFluidTorqueNm`, `meanSoftAngleStep`, and
 `maxSoftAngleStep` for post-run checks.
 
-Caveat: with `softBackboneFluidTorqueScale=1.0` the implicit integrator can
-exhibit positive-feedback growth between IBM slip and backbone deflection
-during the gait ramp-up.  Start with sub-unit `fluidTorqueScale`, longer
-`rampTime`, or smaller `dtAnim/substeps` and increase scale toward 1.0 once
-the residual slip diagnostic stays bounded.
+Caveat: the fluid-loaded coupling is sensitive to the torque scale.  Values as
+low as `softBackboneFluidTorqueScale=0.1` can exhibit positive-feedback growth
+between IBM slip and backbone deflection during gait ramp-up.  Start with
+log-scale probes such as `0`, `1e-4`, `1e-3`, and `1e-2`, use longer
+`--rampTime`, or smaller `dtAnim/substeps` before increasing the scale.  The
+default instability guard aborts a run before NaNs are written when slip grows
+far beyond IBM warning levels or when the soft angle-step limiter saturates for
+several consecutive frames; disable only for debugging with
+`--softBackboneAbortOnInstability=false`.
 
 ## Layout
 
