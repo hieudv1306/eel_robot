@@ -223,14 +223,20 @@ void buildCapsulePositionFrameFromBackbone(
   }
 
   const int nNodes = nSeg + 1;
+  const std::vector<T> nodeTheta = nodeTangentsFromSegmentAngles(state.theta);
   std::vector<T> cxL(nNodes, T(0));
   std::vector<T> cyL(nNodes, T(0));
-  std::vector<T> segTx(nSeg), segTy(nSeg);
+  // Trapezoidal walk using mid-of-node-tangent: matches the legacy
+  // prescribed-wave centerline integration scheme to O(ds^2), even at the
+  // head/tail where the slope changes rapidly.  The legacy
+  // buildCapsulePositionFrame samples slope analytically at every node and
+  // walks with the same rule; we reach the same node positions by inferring
+  // node tangents from segment-midpoint angles via centered averaging plus
+  // boundary linear extrapolation.
   for (int i = 0; i < nSeg; ++i) {
-    segTx[i] = std::cos(state.theta[i]);
-    segTy[i] = std::sin(state.theta[i]);
-    cxL[i + 1] = cxL[i] + dsSpine * segTx[i];
-    cyL[i + 1] = cyL[i] + dsSpine * segTy[i];
+    const T midTheta = T(0.5) * (nodeTheta[i] + nodeTheta[i + 1]);
+    cxL[i + 1] = cxL[i] + dsSpine * std::cos(midTheta);
+    cyL[i + 1] = cyL[i] + dsSpine * std::sin(midTheta);
   }
 
   const T midSeg = T(0.5) * T(nSeg);
@@ -246,30 +252,10 @@ void buildCapsulePositionFrameFromBackbone(
 
   std::vector<T> txV(nNodes), tyV(nNodes), nxN(nNodes), nyN(nNodes);
   for (int i = 0; i < nNodes; ++i) {
-    T tx = T(0);
-    T ty = T(0);
-    if (i == 0) {
-      tx = segTx[0];
-      ty = segTy[0];
-    } else if (i == nNodes - 1) {
-      tx = segTx[nSeg - 1];
-      ty = segTy[nSeg - 1];
-    } else {
-      tx = segTx[i - 1] + segTx[i];
-      ty = segTy[i - 1] + segTy[i];
-      const T len = std::sqrt(tx * tx + ty * ty);
-      if (len > T(1e-12)) {
-        tx /= len;
-        ty /= len;
-      } else {
-        tx = segTx[i];
-        ty = segTy[i];
-      }
-    }
-    txV[i] = tx;
-    tyV[i] = ty;
-    nxN[i] = -ty;
-    nyN[i] =  tx;
+    txV[i] = std::cos(nodeTheta[i]);
+    tyV[i] = std::sin(nodeTheta[i]);
+    nxN[i] = -tyV[i];
+    nyN[i] =  txV[i];
   }
 
   const T r = p.bodyRadius;

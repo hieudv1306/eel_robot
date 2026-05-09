@@ -153,4 +153,59 @@ int main() {
   assert(loaded.segmentTorqueNm.size() == static_cast<size_t>(backbone.nSegments));
   assert(loaded.latticeTorqueToNm > 0.0);
   assert(loaded.maxAbsSegmentTorqueNm > 0.0);
+
+  // ----- Soft transitional path matches legacy prescribed-wave -----
+  // When --bodyKinematics=soft_backbone --softBackboneDynamics=false the
+  // backbone state is the analytical preferred wave, so the IBM markers
+  // produced by the soft path must agree with the legacy prescribed-wave
+  // markers to O(ds^2).  A larger gap means the segment-angle -> centerline
+  // conversion has lost boundary tangent accuracy (issue 1 in the
+  // 2026-05-09 validation).
+  EelParams pCmp = pInext;
+  pCmp.nSpine = 100;
+  pCmp.bodyRadius = 4.0;
+  pCmp.eelScale = 60.0;
+  pCmp.eelFreq = 1.6;
+  pCmp.eelLambda = 1.0;
+  pCmp.eelA0 = 0.07;
+  pCmp.restTime = 0.1;
+  pCmp.rampTime = 0.5;
+  pCmp.dtAnim = 0.04;
+  pCmp.substeps = 20;
+  const T tCmp = 1.0;
+  const T dtCmp = pCmp.dtLbm();
+  const MaterialProperties matCmp = resolveMaterialProperties(pCmp);
+  const PlanarRodSectionEstimate rodCmp = estimatePlanarRodSection(pCmp, matCmp);
+  const SoftBackboneConfig backboneCmp =
+    makeSoftBackboneConfig(pCmp, rodCmp, pCmp.nSpine - 1);
+  assert(backboneCmp.valid);
+
+  LagrangianMarkers legacyMarkers, softMarkers;
+  buildLagrangianMarkers(pCmp, tCmp, 0, 0, 0, 100.0, 60.0, 0.0,
+                         dtCmp, 1.0, legacyMarkers);
+  buildLagrangianMarkersFromSoftBackbone(
+    pCmp, backboneCmp, tCmp, 0, 0, 0, 100.0, 60.0, 0.0,
+    dtCmp, 1.0, softMarkers);
+  assert(legacyMarkers.size() == softMarkers.size());
+
+  T maxDxAbs = 0.0, maxDyAbs = 0.0;
+  T maxDuAbs = 0.0, maxDvAbs = 0.0;
+  for (int i = 0; i < legacyMarkers.size(); ++i) {
+    maxDxAbs = std::max(maxDxAbs,
+                        std::abs(softMarkers.x[i] - legacyMarkers.x[i]));
+    maxDyAbs = std::max(maxDyAbs,
+                        std::abs(softMarkers.y[i] - legacyMarkers.y[i]));
+    maxDuAbs = std::max(maxDuAbs,
+                        std::abs(softMarkers.ud[i] - legacyMarkers.ud[i]));
+    maxDvAbs = std::max(maxDvAbs,
+                        std::abs(softMarkers.vd[i] - legacyMarkers.vd[i]));
+  }
+  // Tolerances chosen with margin around the residual O(ds^2) discretisation
+  // gap (~5e-3 LU positions, ~3e-4 LU/step velocities at nSpine=100).  If a
+  // future change reverts the segment->node tangent conversion, these will
+  // immediately blow past 1e-1 LU and catch the regression.
+  assert(maxDxAbs < 1e-2);
+  assert(maxDyAbs < 1e-2);
+  assert(maxDuAbs < 1e-3);
+  assert(maxDvAbs < 1e-3);
 }

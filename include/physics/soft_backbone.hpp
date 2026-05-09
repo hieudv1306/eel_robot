@@ -72,6 +72,18 @@ SoftBackboneConfig makeSoftBackboneConfig(
 
 SoftBackboneState makeStraightBackboneState(int nSegments, T theta0 = 0.0);
 
+// Derive nNodes = nSegments+1 node tangent angles from nSegments segment
+// angles using centered averaging at interior nodes and linear extrapolation
+// at the head/tail.  This makes the segment-angle representation produce a
+// node-tangent sampling that is compatible with the legacy node-based
+// inextensible-wave centerline (which samples slope analytically at every
+// node and walks the centerline with mid-of-node-tangent / trapezoidal rule).
+// Required for the soft-backbone marker geometry to match the legacy
+// prescribed-wave geometry to O(ds^2) at the body endpoints, where the slope
+// changes most rapidly.
+std::vector<T> nodeTangentsFromSegmentAngles(
+    const std::vector<T>& segmentAngles);
+
 SoftBackboneState preferredBackboneStateWave(
     const EelParams& p,
     const SoftBackboneConfig& config,

@@ -163,6 +163,35 @@ SoftBackboneState makeStraightBackboneState(int nSegments, T theta0)
   return state;
 }
 
+std::vector<T> nodeTangentsFromSegmentAngles(
+    const std::vector<T>& segmentAngles)
+{
+  const int nSeg = static_cast<int>(segmentAngles.size());
+  std::vector<T> nodeTheta;
+  if (nSeg <= 0) {
+    return nodeTheta;
+  }
+  nodeTheta.resize(nSeg + 1);
+  if (nSeg == 1) {
+    nodeTheta[0] = segmentAngles[0];
+    nodeTheta[1] = segmentAngles[0];
+    return nodeTheta;
+  }
+  // Linear extrapolation at the head: nodeTheta[0] = segmentAngles[0] - 0.5 * (segmentAngles[1] - segmentAngles[0])
+  // Centered average at interior:    nodeTheta[i] = segmentAngles[i-1] + 0.5 * (segmentAngles[i] - segmentAngles[i-1])
+  // Linear extrapolation at the tail: nodeTheta[N] = segmentAngles[N-1] + 0.5 * (segmentAngles[N-1] - segmentAngles[N-2])
+  // wrapAngle on the differences keeps a 2pi wrap from corrupting the average.
+  nodeTheta[0] = segmentAngles[0]
+    - T(0.5) * wrapAngle(segmentAngles[1] - segmentAngles[0]);
+  for (int i = 1; i < nSeg; ++i) {
+    nodeTheta[i] = segmentAngles[i - 1]
+      + T(0.5) * wrapAngle(segmentAngles[i] - segmentAngles[i - 1]);
+  }
+  nodeTheta[nSeg] = segmentAngles[nSeg - 1]
+    + T(0.5) * wrapAngle(segmentAngles[nSeg - 1] - segmentAngles[nSeg - 2]);
+  return nodeTheta;
+}
+
 SoftBackboneState preferredBackboneStateWave(
     const EelParams& p,
     const SoftBackboneConfig& config,
@@ -331,11 +360,16 @@ SoftBackboneCenterline buildSoftBackboneCenterlineLU(
 
   const int nSegments = config.nSegments;
   const int nNodes = nSegments + 1;
+  const std::vector<T> nodeTheta = nodeTangentsFromSegmentAngles(state.theta);
   std::vector<T> localX(nNodes, T(0));
   std::vector<T> localY(nNodes, T(0));
+  // Trapezoidal walk (mid-of-node-tangent), matching the legacy
+  // node-based inextensible-wave centerline so soft and prescribed-wave paths
+  // produce coincident centerlines at O(ds^2).
   for (int i = 0; i < nSegments; ++i) {
-    localX[i + 1] = localX[i] + dsLu * std::cos(state.theta[i]);
-    localY[i + 1] = localY[i] + dsLu * std::sin(state.theta[i]);
+    const T midTheta = T(0.5) * (nodeTheta[i] + nodeTheta[i + 1]);
+    localX[i + 1] = localX[i] + dsLu * std::cos(midTheta);
+    localY[i + 1] = localY[i] + dsLu * std::sin(midTheta);
   }
 
   const T midSeg = T(0.5) * T(nSegments);
