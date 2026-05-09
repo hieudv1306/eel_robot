@@ -22,7 +22,6 @@ struct EelParams {
   T      eelFreq      = 1.6;
   T      eelLambda    = 1.0;
   T      eelA0        = 0.07;
-  GeometryKinematics geometryKinematics = GeometryKinematics::HeightWave;
   WaveDirection waveDirection = WaveDirection::HeadToTail;
   T      restTime     = 0.2;
   T      rampTime     = 1.6;
@@ -31,7 +30,6 @@ struct EelParams {
   int    substeps     = 80;
   T      Ttotal       = 15.0;
 
-  T      kappa        = 2.0;
   int    nIbmIters    = 1;
   int    markerInterval = 1;
   T      warnMeanSlip    = 0.005;

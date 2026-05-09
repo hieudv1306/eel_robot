@@ -40,9 +40,6 @@ void buildCapsulePositionFrame(
   (void)gaitRampRate;
   const T ampScale = ampRamp * gaitRamp;
 
-  // Local frame: centered at CM (s = L/2)
-  const T sCm = 0.5 * L;
-
   std::vector<T> cxL(nSp), cyL(nSp);
   std::vector<T> Abase(nSp), Aval(nSp), phase(nSp);
   std::vector<T> txV(nSp), tyV(nSp), nxN(nSp), nyN(nSp);
@@ -76,47 +73,32 @@ void buildCapsulePositionFrame(
       + dAds * std::sin(phase[i]);
   }
 
-  if (p.geometryKinematics == GeometryKinematics::InextensibleWave) {
-    std::vector<T> tangentAngle(nSp);
-    for (int i = 0; i < nSp; ++i) {
-      tangentAngle[i] = std::atan(slope[i]);
-      txV[i] = std::cos(tangentAngle[i]);
-      tyV[i] = std::sin(tangentAngle[i]);
-      nxN[i] = -tyV[i];
-      nyN[i] =  txV[i];
-    }
+  std::vector<T> tangentAngle(nSp);
+  for (int i = 0; i < nSp; ++i) {
+    tangentAngle[i] = std::atan(slope[i]);
+    txV[i] = std::cos(tangentAngle[i]);
+    tyV[i] = std::sin(tangentAngle[i]);
+    nxN[i] = -tyV[i];
+    nyN[i] =  txV[i];
+  }
 
-    cxL[0] = T(0);
-    cyL[0] = T(0);
-    for (int i = 1; i < nSp; ++i) {
-      const T aMid = T(0.5) * (tangentAngle[i - 1] + tangentAngle[i]);
-      cxL[i] = cxL[i - 1] + dsSpine * std::cos(aMid);
-      cyL[i] = cyL[i - 1] + dsSpine * std::sin(aMid);
-    }
+  cxL[0] = T(0);
+  cyL[0] = T(0);
+  for (int i = 1; i < nSp; ++i) {
+    const T aMid = T(0.5) * (tangentAngle[i - 1] + tangentAngle[i]);
+    cxL[i] = cxL[i - 1] + dsSpine * std::cos(aMid);
+    cyL[i] = cyL[i - 1] + dsSpine * std::sin(aMid);
+  }
 
-    const T midIndex = T(0.5) * T(nSp - 1);
-    const int iMid0 = static_cast<int>(std::floor(midIndex));
-    const int iMid1 = std::min(iMid0 + 1, nSp - 1);
-    const T midFrac = midIndex - T(iMid0);
-    const T xMid = cxL[iMid0] * (T(1) - midFrac) + cxL[iMid1] * midFrac;
-    const T yMid = cyL[iMid0] * (T(1) - midFrac) + cyL[iMid1] * midFrac;
-    for (int i = 0; i < nSp; ++i) {
-      cxL[i] -= xMid;
-      cyL[i] -= yMid;
-    }
-  } else {
-    for (int i = 0; i < nSp; ++i) {
-      cxL[i] = scale * (s[i] - sCm);
-      cyL[i] = scale * Aval[i] * std::sin(phase[i]);
-
-      const T dxDs = scale;
-      const T dyDs = scale * slope[i];
-      const T tlen = std::sqrt(dxDs * dxDs + dyDs * dyDs);
-      txV[i] = dxDs / tlen;
-      tyV[i] = dyDs / tlen;
-      nxN[i] = -tyV[i];
-      nyN[i] =  txV[i];
-    }
+  const T midIndex = T(0.5) * T(nSp - 1);
+  const int iMid0 = static_cast<int>(std::floor(midIndex));
+  const int iMid1 = std::min(iMid0 + 1, nSp - 1);
+  const T midFrac = midIndex - T(iMid0);
+  const T xMid = cxL[iMid0] * (T(1) - midFrac) + cxL[iMid1] * midFrac;
+  const T yMid = cyL[iMid0] * (T(1) - midFrac) + cyL[iMid1] * midFrac;
+  for (int i = 0; i < nSp; ++i) {
+    cxL[i] -= xMid;
+    cyL[i] -= yMid;
   }
 
   // Upper/lower surfaces in local frame

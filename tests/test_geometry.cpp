@@ -53,7 +53,6 @@ int main() {
 
   EelParams pInext = p;
   pInext.nSpine = 50;
-  pInext.geometryKinematics = GeometryKinematics::InextensibleWave;
   buildCapsuleGeometry(pInext, 2.0, 100.0, 60.0, 0.0, dt, 1.0,
                        x, y, ux, uy, ds);
   const T dsSpine = pInext.eelScale * pInext.eelLength / (pInext.nSpine - 1);

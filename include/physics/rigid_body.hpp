@@ -45,26 +45,17 @@ struct BodyInertia {
 struct ClampAudit {
   std::uint64_t initialPlacementClampCount = 0;
   std::uint64_t runtimeDomainClampCount = 0;
-  std::uint64_t speedClampCount = 0;
-  std::uint64_t omegaClampCount = 0;
   bool initialPlacementClamped = false;
   bool runtimeDomainClampHit = false;
-  bool speedClampHit = false;
-  bool omegaClampHit = false;
 };
 
 BodyInertia computeBodyInertia(const EelParams& p, T rhoBody = 1.0);
-void enforceModeDefinitionState(SimulationCase simCase,
-                                const BodyReferenceState& reference,
+void enforceModeDefinitionState(const BodyReferenceState& reference,
                                 BodyState& state);
-void applyRigidBodyForceUpdate(SimulationCase simCase,
-                               T tKinematics,
+void applyRigidBodyForceUpdate(T tKinematics,
                                T restTime,
                                T fxS,
-                               T fyS,
-                               T tzS,
                                const BodyInertia& inertia,
                                BodyState& state);
-void advanceRigidBodyPose(SimulationCase simCase,
-                          const BodyReferenceState& reference,
+void advanceRigidBodyPose(const BodyReferenceState& reference,
                           BodyState& state);

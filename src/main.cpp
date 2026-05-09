@@ -90,16 +90,10 @@ int main(int argc, char* argv[])
   StudyMode& studyMode = config.studyMode;
   SimulationCase& simCase = config.simCase;
   WarmupMode& warmupMode = config.warmupMode;
-  GaitNormalization& gaitNormalization = config.gaitNormalization;
   BodyKinematics& bodyKinematics = config.bodyKinematics;
   bool& softBackboneDynamics = config.softBackboneDynamics;
-  T& tailAmpRatioTarget = config.tailAmpRatioTarget;
-  T& targetSt = config.targetSt;
-  T& referenceU = config.referenceU;
   T& alphaIBM = config.alphaIBM;
   int& ibmIterations = config.ibmIterations;
-  bool& legacyKappaInputUsed = config.legacyKappaInputUsed;
-  T& legacyKappaInputValue = config.legacyKappaInputValue;
   bool& rawGeometryOverride = config.rawGeometryOverride;
   bool& aspectGeometryOverride = config.aspectGeometryOverride;
   T& tCut = config.tCut;
@@ -112,11 +106,6 @@ int main(int argc, char* argv[])
   bool& exportDiagnostics = config.exportDiagnostics;
   bool& exportBody = config.exportBody;
 
-  if (legacyKappaInputUsed) {
-    clout << "Deprecated: --kappa mapped to --alphaIBM (kappa="
-          << legacyKappaInputValue << " -> alphaIBM=" << alphaIBM
-          << "). Prefer --alphaIBM=<value> in new scripts." << std::endl;
-  }
   if (softBackboneDynamics &&
       bodyKinematics != BodyKinematics::SoftBackbone) {
     clout << "ERROR: --softBackboneDynamics=true requires "
@@ -136,67 +125,6 @@ int main(int argc, char* argv[])
     p.aspectRatio = p.totalGeometricLengthLU() / p.bodyWidthLU();
     p.bodyAreaTarget = p.capsuleAreaLU();
   }
-
-  // ----------------------------------------------------------------
-  //  Gait normalization for AR sweeps
-  // ----------------------------------------------------------------
-  //  Applied AFTER geometry has been resolved.  Preserves restTime /
-  //  rampTime / lambda / substeps unchanged; only eelA0 (tailAmpRatio)
-  //  or eelFreq (targetSt) is rescaled.  The pre-normalization values are
-  //  recorded so they can be reported alongside the effective values.
-  const T preNormEelFreq = p.eelFreq;
-  const T preNormEelA0   = p.eelA0;
-  GaitNormalization effectiveGaitNormalization = gaitNormalization;
-  T resolvedTailAmpRatioTarget = tailAmpRatioTarget;
-  if (gaitNormalization == GaitNormalization::TailAmpRatio) {
-    // Baseline = default EelParams geometry & gait.  This gives a single
-    // well-defined target ratio that AR sweeps can be normalized against
-    // even when the user does not pass --tailAmpRatioTarget explicitly.
-    EelParams pBaseline;
-    if (!updateGeometryFromAspectRatio(pBaseline)) {
-      clout << "WARNING: tailAmpRatio normalization could not derive a "
-            << "default baseline; falling back to gaitNormalization=fixed."
-            << std::endl;
-      effectiveGaitNormalization = GaitNormalization::Fixed;
-    } else {
-      const T baselineRatio =
-        pBaseline.tailAmplitudeLU() / pBaseline.totalGeometricLengthLU();
-      const T targetRatio = (tailAmpRatioTarget > T(0))
-                          ? tailAmpRatioTarget : baselineRatio;
-      resolvedTailAmpRatioTarget = targetRatio;
-      // tailAmplitudeLU = eelA0 * 2.3 * eelScale,
-      // totalLength    = eelScale + 2*bodyRadius
-      // => eelA0 = targetRatio * totalLength / (2.3 * eelScale)
-      const T totalLength = p.totalGeometricLengthLU();
-      const T denom = T(2.3) * p.eelScale;
-      if (denom > T(1e-12)) {
-        p.eelA0 = targetRatio * totalLength / denom;
-      } else {
-        clout << "WARNING: tailAmpRatio normalization aborted (eelScale=0); "
-              << "falling back to gaitNormalization=fixed." << std::endl;
-        effectiveGaitNormalization = GaitNormalization::Fixed;
-      }
-    }
-  } else if (gaitNormalization == GaitNormalization::TargetSt) {
-    // Strouhal in lattice units:
-    //   St = (eelFreq[Hz] * dtLbm[s/step]) * tailPP[lu] / U[lu/step]
-    // referenceU is given in lattice units (lu/step) to match the reported
-    // Uswim.  Solve for eelFreq[Hz]:
-    //   eelFreq = targetSt * U / (dtLbm * tailPP)
-    const T tailPP = p.tailPeakToPeakLU();
-    const T dtLbm  = p.dtLbm();
-    if (!(targetSt > T(0)) || !(referenceU > T(0)) ||
-        !(tailPP > T(1e-12)) || !(dtLbm > T(1e-12))) {
-      clout << "WARNING: targetSt normalization needs --targetSt>0 and "
-            << "--referenceU>0 with a finite tailPP and dtLbm; falling back "
-            << "to gaitNormalization=fixed." << std::endl;
-      effectiveGaitNormalization = GaitNormalization::Fixed;
-    } else {
-      p.eelFreq = targetSt * referenceU / (dtLbm * tailPP);
-    }
-  }
-  const T effectiveEelFreq = p.eelFreq;
-  const T effectiveEelA0   = p.eelA0;
 
   if (tCut < T(0)) {
     const T periodsForAverage = (p.eelFreq > T(1e-12)) ? T(5) / p.eelFreq : T(3);
@@ -237,7 +165,6 @@ int main(int argc, char* argv[])
   const int ny = p.ny;
   const T dtLbm = p.dtLbm();
   const int nFrames = p.nFrames();
-  const bool fixedInflow = (simCase == SimulationCase::FixedInflow);
 
   clout << "==== Self-propelled eel 3-DOF (OpenLB-native fluid + custom IBM) ====" << std::endl;
   clout << "Run ID: " << runId << std::endl;
@@ -247,44 +174,23 @@ int main(int argc, char* argv[])
   clout << "Grid: " << nx << " x " << ny << "  tau=" << p.tau
         << "  nu=" << p.nu() << std::endl;
   clout << "Case: " << simulationCaseName(simCase)
-        << "  inflowU=" << (fixedInflow ? p.inflowVelocity : T(0))
         << "  wallBoundary=" << wallBoundaryName(wallBoundary) << std::endl;
   clout << "AR study: useAspectRatioGeometry=" << (p.useAspectRatioGeometry ? "true" : "false")
         << "  AR=" << p.aspectRatio
         << "  bodyAreaTarget=" << p.bodyAreaTarget
         << "  tCut=" << tCut << std::endl;
-  if (simCase != SimulationCase::SurgeOnly) {
-    clout << "NOTE: surge_only is the preferred first optimization mode for AR studies; "
-          << "other cases are retained for validation/debugging." << std::endl;
-  } else {
-    clout << "Mode note: surge_only advances only the streamwise rigid-body DOF; "
-          << "heave/yaw are excluded by model definition." << std::endl;
-  }
+  clout << "Mode note: surge_only advances only the streamwise rigid-body DOF; "
+        << "heave/yaw are excluded by model definition." << std::endl;
   clout << "Eel: centerlineL=" << p.centerlineLengthLU()
         << " lu  totalL=" << p.totalGeometricLengthLU()
         << " lu  W=" << p.bodyWidthLU()
         << " lu  freq=" << p.eelFreq
         << "  lambda=" << p.eelLambda
-        << "  geometryKinematics="
-        << geometryKinematicsName(p.geometryKinematics)
         << "  waveDirection=" << waveDirectionName(p.waveDirection)
         << "  bodyKinematics="
         << bodyKinematicsName(bodyKinematics) << std::endl;
   clout << "Warmup: mode=" << warmupModeName(warmupMode)
         << "  nWarmup=" << p.nWarmup << std::endl;
-  clout << "Gait normalization: requested=" << gaitNormalizationName(gaitNormalization)
-        << "  effective=" << gaitNormalizationName(effectiveGaitNormalization)
-        << "  preNorm(eelFreq=" << preNormEelFreq
-        << ", eelA0=" << preNormEelA0 << ")"
-        << "  effective(eelFreq=" << effectiveEelFreq
-        << ", eelA0=" << effectiveEelA0 << ")";
-  if (effectiveGaitNormalization == GaitNormalization::TailAmpRatio) {
-    clout << "  tailAmpRatioTarget=" << resolvedTailAmpRatioTarget;
-  } else if (effectiveGaitNormalization == GaitNormalization::TargetSt) {
-    clout << "  targetSt=" << targetSt
-          << "  referenceU=" << referenceU << " (lu/step)";
-  }
-  clout << std::endl;
   clout << "Time: Ttotal=" << p.Ttotal << "  dt_anim=" << p.dtAnim
         << "  substeps=" << p.substeps << "  dt_lbm=" << dtLbm << std::endl;
   clout << "OpenMP threads: " << omp_get_max_threads()
@@ -303,13 +209,11 @@ int main(int argc, char* argv[])
   }
   clout << "IBM: alphaIBM=" << alphaIBM
         << "  ibmIterations=" << ibmIterations
-        << "  legacyKappaInput=" << (legacyKappaInputUsed ? 1 : 0)
         << " (forcing law: F = alphaIBM * rho_local * (Ud - U_interp) / dt;"
         << " rho_local=1.0, dt=1.0 in lattice units;"
         << " iterations use sparse Eulerian correction re-interpolation)"
         << std::endl;
-  clout << "IBM legacy params: kappa(stored)=" << p.kappa
-        << "  nIbmIters(requested)=" << p.nIbmIters
+  clout << "IBM legacy params: nIbmIters(requested)=" << p.nIbmIters
         << "  spongeWidth=" << p.spongeWidth
         << "  spongeStrength=" << p.spongeStrength << std::endl;
   clout << "IBM warnings: meanSlip>" << p.warnMeanSlip
@@ -340,9 +244,8 @@ int main(int argc, char* argv[])
   superGeometry.rename(0, 2);
   superGeometry.rename(2, 1, {1, 1});
 
-  // Channel layout follows the Python vortex-street validation case:
-  // top/bottom are no-slip walls; fixed_inflow uses a left velocity inlet
-  // and right pressure outlet, while swimming cases keep both sides open.
+  // Channel layout: top/bottom are no-slip walls; both ends are open
+  // pressure boundaries for the self-propelled swimming case.
   IndicatorCuboid2D<T> leftOpen({0.25, T(ny - 1)}, {T(0), T(0)});
   IndicatorCuboid2D<T> rightOpen({0.25, T(ny - 1)}, {T(nx - 1) - 0.25, T(0)});
   superGeometry.rename(2, 3, 1, leftOpen);
@@ -363,31 +266,18 @@ int main(int argc, char* argv[])
   } else {
     boundary::set<boundary::BounceBack>(sLattice, superGeometry, 2);
   }
-  if (fixedInflow) {
-    boundary::set<boundary::InterpolatedVelocity>(sLattice, superGeometry, 3);
-  } else {
-    boundary::set<boundary::InterpolatedPressure>(sLattice, superGeometry, 3);
-  }
+  boundary::set<boundary::InterpolatedPressure>(sLattice, superGeometry, 3);
   boundary::set<boundary::InterpolatedPressure>(sLattice, superGeometry, 4);
   sLattice.template setParameter<descriptors::OMEGA>(p.omega_lbm());
 
   AnalyticalConst2D<T,T> rho0(1.0);
-  AnalyticalConst2D<T,T> u0(fixedInflow ? p.inflowVelocity : T(0), 0.0);
+  AnalyticalConst2D<T,T> u0(0.0, 0.0);
   AnalyticalConst2D<T,T> f0(0.0, 0.0);
   auto fluidAndBoundary = superGeometry.getMaterialIndicator({1, 2, 3, 4});
   sLattice.iniEquilibrium(fluidAndBoundary, rho0, u0);
   sLattice.defineRhoU(fluidAndBoundary, rho0, u0);
-  if (fixedInflow) {
-    AnalyticalConst2D<T,T> uIn(p.inflowVelocity, 0.0);
-    sLattice.defineU(superGeometry, 3, uIn);
-  }
   fields::set<descriptors::FORCE>(sLattice, fluidAndBoundary, f0);
   sLattice.initialize();
-  if (fixedInflow) {
-    sLattice.template setProcessingContext<
-      Array<momenta::FixedVelocityMomentumGeneric::VELOCITY>>(
-        ProcessingContext::Simulation);
-  }
 
   // ---- Sponge zone near open (left/right) boundaries ----
   //
@@ -395,7 +285,7 @@ int main(int argc, char* argv[])
   // workflow we keep this as a lattice FORCE-field damping layer, so the
   // damping is applied by ForcedBGKdynamics instead of direct population edits.
   auto resetEulerForce = [&]() {
-    resetEulerForceField(p, sLattice, fixedInflow);
+    resetEulerForceField(p, sLattice, /*fixedInflow=*/false);
   };
   resetEulerForce();
 
@@ -564,8 +454,7 @@ int main(int argc, char* argv[])
   if (bodyKinematics == BodyKinematics::SoftBackbone) {
     clout << "Soft backbone coupling: dynamics="
           << (softBackboneDynamics ? "enabled" : "disabled")
-          << "  integrator="
-          << softBackboneIntegratorName(config.softBackboneIntegrator)
+          << "  integrator=implicit"
           << "  relaxationTime=" << config.softBackboneRelaxationTime
           << " s  fluidTorqueScale="
           << config.softBackboneFluidTorqueScale
@@ -614,16 +503,9 @@ int main(int argc, char* argv[])
   clout << "  freq_lattice         = " << freqLat << " /step" << std::endl;
   clout << "  steps/undulation     = " << (1.0 / freqLat) << std::endl;
 
-  // Validation-friendly case semantics:
-  //  fixed_inflow      : body held fixed and undulation disabled, so inlet/outlet
-  //                      and wall behavior can be checked against a stationary body.
-  //  fixed_undulation  : body pose held fixed while the prescribed undulation remains
-  //                      active, isolating IBM enforcement and wake generation.
-  //  surge_only        : true reduced-order self-propelled model; only streamwise
-  //                      translation is a dynamic state. Heave/yaw are not evolved.
-  auto deformationAmpScale = [&]() -> T {
-    return (simCase == SimulationCase::FixedInflow) ? T(0) : T(1);
-  };
+  // surge_only: reduced-order self-propelled model — only streamwise
+  // translation is a dynamic state.  Heave/yaw are pinned by definition.
+  auto deformationAmpScale = []() -> T { return T(1); };
 
   SoftBackboneDynamicsParams softDynamicsParams;
   softDynamicsParams.relaxationTime = config.softBackboneRelaxationTime;
@@ -636,14 +518,8 @@ int main(int argc, char* argv[])
                                  deformationAmpScale());
   }
 
-  const bool fixedPoseMode =
-    (simCase == SimulationCase::FixedInflow ||
-     simCase == SimulationCase::FixedUndulation);
-  const bool surgeOnlyMode = (simCase == SimulationCase::SurgeOnly);
-  const bool full3DofMode  = (simCase == SimulationCase::Full3Dof);
-
   auto applyModeDefinitionState = [&]() {
-    enforceModeDefinitionState(simCase, {xCmRef, yCmRef, thetaRef}, bodyState);
+    enforceModeDefinitionState({xCmRef, yCmRef, thetaRef}, bodyState);
   };
 
   bool runtimeDomainClampWarned = false;
@@ -670,8 +546,7 @@ int main(int argc, char* argv[])
     xCm = std::clamp(xCm, xMargin, T(nx - 1) - xMargin);
     yCm = std::clamp(yCm, yMargin, T(ny - 1) - yMargin);
 
-    if (xCm != oldX && (surgeOnlyMode || full3DofMode)) Vx = T(0);
-    if (yCm != oldY && full3DofMode) Vy = T(0);
+    if (xCm != oldX) Vx = T(0);
     if (xCm != oldX || yCm != oldY) {
       clampAudit.runtimeDomainClampHit = true;
       ++clampAudit.runtimeDomainClampCount;
@@ -681,10 +556,7 @@ int main(int argc, char* argv[])
               << xCm << ", " << yCm << ")." << std::endl;
         runtimeDomainClampWarned = true;
       }
-      if (fixedPoseMode) {
-        xCmRef = xCm;
-        yCmRef = yCm;
-      } else if (surgeOnlyMode && yCm != oldY) {
+      if (yCm != oldY) {
         yCmRef = yCm;
       }
     }
@@ -743,17 +615,10 @@ int main(int argc, char* argv[])
     return 1;
   }
 
-  // Kinematic time offset:
-  //  * undulation: legacy behavior — gait clock during the main loop is
-  //    offset by warmupDuration so that the gait is already past restTime
-  //    and partially ramped when history starts.
-  //  * rest / none: gait clock starts at 0 at history t=0, so history t=0
-  //    coincides with the first real gait ramp onset.  This makes per-cycle
-  //    averages from cycle 1 phase-aligned with the gait kinematics.
-  const T warmupDuration =
-    (warmupMode == WarmupMode::Undulation) ? T(p.nWarmup) * dtLbm : T(0);
+  // Kinematic time offset: gait clock starts at 0 at history t=0 so per-cycle
+  // averages from cycle 1 are phase-aligned with the gait kinematics.
   auto kinematicTimeAt = [&](T reportedTime) -> T {
-    return warmupDuration + reportedTime;
+    return reportedTime;
   };
 
   // ---- Warmup ----
@@ -761,19 +626,13 @@ int main(int argc, char* argv[])
   if (warmupMode == WarmupMode::None) {
     clout << "Warmup mode: none — skipping warmup loop." << std::endl;
   } else {
-    const char* modeLabel =
-      (warmupMode == WarmupMode::Rest) ? "rest" : "undulation";
-    clout << "Starting warmup (" << p.nWarmup << " steps, mode="
-          << modeLabel << ")..." << std::endl;
+    clout << "Starting warmup (" << p.nWarmup << " steps, mode=rest)..."
+          << std::endl;
     for (int step = 0; step < p.nWarmup; ++step) {
-      // For rest mode we always pass tWarmup=0: actuationProfile returns
-      // ampScale=0 there, so the body stays in its still pose and the
-      // fluid relaxes to a quiescent / boundary-consistent state.  For
-      // undulation mode we advance the gait clock through the warmup so
-      // the gait is partially ramped by the time history begins.
-      const T tWarmup = (warmupMode == WarmupMode::Rest)
-                      ? T(0) : T(step) * dtLbm;
-      if (!buildMarkersChecked(tWarmup, markers, "warmup")) {
+      // Rest warmup: actuationProfile at tWarmup=0 returns ampScale=0, so the
+      // body stays in its still pose and the fluid relaxes to a quiescent /
+      // boundary-consistent state.
+      if (!buildMarkersChecked(T(0), markers, "warmup")) {
         return 1;
       }
       ibmStep(p, markers, xCm, yCm, Vx, Vy, omegaZ, sLattice,
@@ -829,17 +688,6 @@ int main(int argc, char* argv[])
   clout << "Starting main simulation: " << nFrames << " frames, "
         << p.substeps << " substeps each." << std::endl;
 
-  // Emergency Mach-safety caps for rigid-body motion seen by the IBM markers.
-  // These are numerical protections, not part of the model definition:
-  //  - translational cap:
-  //      full3dof only -> limits sqrt(Vx^2 + Vy^2)
-  //  - yaw-rate cap:
-  //      full3dof only; surge_only defines omegaZ = 0 exactly
-  //
-  // The LBM Mach number should stay below ~0.1 (u < 0.058 lu/step).
-  // 0.05 leaves a small safety margin without clipping ordinary low-speed runs.
-  T maxBodyTranslationSpeedLat = 0.05;
-  T maxBodyYawRateLat = 0.005;
   int softBackboneSaturatedFrameCount = 0;
 
   for (int frame = 0; frame < nFrames; ++frame) {
@@ -905,13 +753,9 @@ int main(int argc, char* argv[])
             p, softBackbone, tKinematics + dtLbm, dtLbm,
             deformationAmpScale());
         const SoftBackboneDynamicsDiagnostics softDynDiag =
-          (config.softBackboneIntegrator == SoftBackboneIntegrator::Implicit)
-            ? advanceSoftBackboneImplicit(
-                softBackbone, preferredNext, softProjection.segmentTorqueNm,
-                dtLbm, softDynamicsParams, softDynamicState)
-            : advanceSoftBackboneOverdamped(
-                softBackbone, preferredNext, softProjection.segmentTorqueNm,
-                dtLbm, softDynamicsParams, softDynamicState);
+          advanceSoftBackboneImplicit(
+            softBackbone, preferredNext, softProjection.segmentTorqueNm,
+            dtLbm, softDynamicsParams, softDynamicState);
         if (std::isfinite(softDynDiag.maxAbsFluidSegmentTorqueNm) &&
             std::isfinite(softDynDiag.maxAbsAngleStep)) {
           softFluidTorqueAccum += softDynDiag.maxAbsFluidSegmentTorqueNm;
@@ -950,43 +794,13 @@ int main(int argc, char* argv[])
 
         // Newton-Euler: ΔV = F/M  (δt = 1 in lattice units).
         // Forces are the body-reaction from this fluid step's IBM evaluation.
-        applyRigidBodyForceUpdate(simCase, tKinematics, p.restTime,
-                                  fxS, fyS, tzS, bodyInertia, bodyState);
+        // surge_only: only the streamwise force component is integrated.
+        applyRigidBodyForceUpdate(tKinematics, p.restTime,
+                                  fxS, bodyInertia, bodyState);
       }
 
-      // Position/orientation: Δx = V, Δθ = ω  (δt = 1).
-      advanceRigidBodyPose(simCase, {xCmRef, yCmRef, thetaRef}, bodyState);
-
-      // In surge_only mode, we solve a reduced 1-DOF system:
-      // Only Vx is integrated dynamically.
-      // No artificial velocity clamping is applied,
-      // to preserve physical consistency of force -> acceleration -> velocity.
-      if (full3DofMode) {
-        const T translationSpeedLat = std::sqrt(Vx * Vx + Vy * Vy);
-        if (translationSpeedLat > maxBodyTranslationSpeedLat) {
-          if (!clampAudit.speedClampHit) {
-            clout << "WARNING: body-speed Mach safety cap activated at t=" << tSub
-                  << "  |V|=" << translationSpeedLat
-                  << " > " << maxBodyTranslationSpeedLat << std::endl;
-            clampAudit.speedClampHit = true;
-          }
-          ++clampAudit.speedClampCount;
-          const T factor = maxBodyTranslationSpeedLat / translationSpeedLat;
-          Vx *= factor;
-          Vy *= factor;
-        }
-        const T yawRateLat = std::abs(omegaZ);
-        if (yawRateLat > maxBodyYawRateLat) {
-          if (!clampAudit.omegaClampHit) {
-            clout << "WARNING: yaw-rate safety cap activated at t=" << tSub
-                  << "  |omega|=" << yawRateLat << " > " << maxBodyYawRateLat
-                  << std::endl;
-            clampAudit.omegaClampHit = true;
-          }
-          ++clampAudit.omegaClampCount;
-          omegaZ *= maxBodyYawRateLat / yawRateLat;
-        }
-      }
+      // Position/orientation: Δx = V  (δt = 1).  surge_only pins heave/yaw.
+      advanceRigidBodyPose({xCmRef, yCmRef, thetaRef}, bodyState);
 
       if (!clampBodyBeforeMarkers()) {
         return 1;
@@ -1052,20 +866,18 @@ int main(int argc, char* argv[])
     // ---- Non-dimensional diagnostics ----
     T absUswim = std::abs(Uswim);
     T bodySpeed = std::sqrt(Vx * Vx + Vy * Vy);
-    T diagnosticSpeed = fixedInflow ? std::abs(p.inflowVelocity) : absUswim;
-    // Mach number (lattice).  fixed_inflow reports the imposed inflow speed.
-    T machLat = (fixedInflow ? std::abs(p.inflowVelocity) : bodySpeed)
-              / std::sqrt(T(1) / T(3));
-    // Reynolds number: Re = U_ref * total capsule length / nu.
-    T Re_inst = diagnosticSpeed * bodyLength / p.nu();
+    // Mach number (lattice).
+    T machLat = bodySpeed / std::sqrt(T(1) / T(3));
+    // Reynolds number: Re = U_swim * total capsule length / nu.
+    T Re_inst = absUswim * bodyLength / p.nu();
     // Strouhal number:  St = f * A_pp / |U_swim|
     //   f = eelFreq [Hz],  dtLbm [s/step],  A_pp [lu],  U [lu/step]
     //   St = (f * dtLbm) * A_pp / |U|   (all in lattice units)
-    T St_inst = (!fixedInflow && absUswim > 1e-12)
+    T St_inst = (absUswim > 1e-12)
               ? freqLat * tailPP / absUswim
               : 0.0;
     // Non-dimensional swimming speed:  U* = U_swim / (f * L)
-    T Ustar = (!fixedInflow && absUswim > 1e-12 && freqLat > 1e-12)
+    T Ustar = (absUswim > 1e-12 && freqLat > 1e-12)
             ? absUswim / (freqLat * bodyLength)
             : 0.0;
 
@@ -1323,7 +1135,7 @@ int main(int argc, char* argv[])
   const T steadyMeanSoftAngleStep = meanAfterTCut(histMeanSoftAngleStep);
   const T steadyMaxSoftAngleStep = maxAfterTCut(histMaxSoftAngleStep);
 
-  const int recommendedSteadySamples = recommendedSteadySampleCount(p, simCase);
+  const int recommendedSteadySamples = recommendedSteadySampleCount(p);
   const bool enoughSteadySamples = (steady.nSamples >= recommendedSteadySamples);
 
   // ----------------------------------------------------------------
@@ -1346,7 +1158,6 @@ int main(int argc, char* argv[])
   summaryInput.cycleConv = cycleConv;
   summaryInput.simCase = simCase;
   summaryInput.warmupMode = warmupMode;
-  summaryInput.gaitNormalization = effectiveGaitNormalization;
   summaryInput.wallBoundary = wallBoundary;
   summaryInput.bodyKinematics = bodyKinematics;
   summaryInput.initialPlacementClamped = clampAudit.initialPlacementClamped;
@@ -1361,10 +1172,7 @@ int main(int argc, char* argv[])
   summaryInput.bodyWidth = bodyWidth;
   summaryInput.mass = mass;
   summaryInput.Ibody = Ibody;
-  summaryInput.effectiveEelFreq = effectiveEelFreq;
-  summaryInput.effectiveEelA0 = effectiveEelA0;
   summaryInput.alphaIBM = alphaIBM;
-  summaryInput.legacyKappaInputUsed = legacyKappaInputUsed;
   summaryInput.ibmIterations = ibmIterations;
   summaryInput.softBackboneDynamics = softBackboneDynamics;
   summaryInput.softBackboneRelaxationTime = config.softBackboneRelaxationTime;
@@ -1396,16 +1204,12 @@ int main(int argc, char* argv[])
   verificationInput.simCase = simCase;
   verificationInput.studyMode = studyMode;
   verificationInput.warmupMode = warmupMode;
-  verificationInput.gaitNormalization = effectiveGaitNormalization;
   verificationInput.wallBoundary = wallBoundary;
   verificationInput.bodyKinematics = bodyKinematics;
   verificationInput.initialPlacementClamped = clampAudit.initialPlacementClamped;
   verificationInput.initialPlacementClampCount = clampAudit.initialPlacementClampCount;
-  verificationInput.speedClampHit = clampAudit.speedClampHit;
   verificationInput.runtimeDomainClampHit = clampAudit.runtimeDomainClampHit;
-  verificationInput.speedClampCount = clampAudit.speedClampCount;
   verificationInput.runtimeDomainClampCount = clampAudit.runtimeDomainClampCount;
-  verificationInput.omegaClampCount = clampAudit.omegaClampCount;
   verificationInput.nx = nx;
   verificationInput.ny = ny;
   verificationInput.dtLbm = dtLbm;
@@ -1415,10 +1219,7 @@ int main(int argc, char* argv[])
   verificationInput.bodyWidth = bodyWidth;
   verificationInput.mass = mass;
   verificationInput.Ibody = Ibody;
-  verificationInput.effectiveEelFreq = effectiveEelFreq;
-  verificationInput.effectiveEelA0 = effectiveEelA0;
   verificationInput.alphaIBM = alphaIBM;
-  verificationInput.legacyKappaInputUsed = legacyKappaInputUsed;
   verificationInput.ibmIterations = ibmIterations;
   verificationInput.softBackboneDynamics = softBackboneDynamics;
   verificationInput.softBackboneRelaxationTime =
@@ -1448,7 +1249,6 @@ int main(int argc, char* argv[])
         << "  simCase=" << simulationCaseName(simCase)
         << "  grid=" << nx << "x" << ny
         << "  tau=" << p.tau
-        << "  kappa=" << p.kappa
         << "  substeps=" << p.substeps << std::endl;
   clout << "meanU=" << steady.meanU
         << "  meanP=" << steady.meanP
@@ -1480,24 +1280,20 @@ int main(int argc, char* argv[])
         << "  cycleCvNormalizedSlip=" << cycleConv.cycleCvNormalizedSlip
         << "  cycleConverged=" << (cycleConv.cycleConverged ? "yes" : "no")
         << std::endl;
-  clout << "speedClampCount=" << clampAudit.speedClampCount
-        << "  runtimeDomainClampHit=" << (clampAudit.runtimeDomainClampHit ? 1 : 0)
+  clout << "runtimeDomainClampHit=" << (clampAudit.runtimeDomainClampHit ? 1 : 0)
         << "  runtimeDomainClampCount=" << clampAudit.runtimeDomainClampCount
-        << "  omegaClampCount=" << clampAudit.omegaClampCount << std::endl;
+        << std::endl;
   clout << "initialPlacementClamped=" << (clampAudit.initialPlacementClamped ? 1 : 0)
         << "  initialPlacementClampCount=" << clampAudit.initialPlacementClampCount
         << "  (one-shot setup nudge from initialPositionFactor / rightMargin; "
         << "not a runtime issue)" << std::endl;
   clout << "warmupMode=" << warmupModeName(warmupMode)
-        << "  gaitNormalization=" << gaitNormalizationName(effectiveGaitNormalization)
-        << "  geometryKinematics=" << geometryKinematicsName(p.geometryKinematics)
         << "  waveDirection=" << waveDirectionName(p.waveDirection)
         << "  bodyKinematics=" << bodyKinematicsName(bodyKinematics)
-        << "  effectiveEelFreq=" << effectiveEelFreq
-        << "  effectiveEelA0=" << effectiveEelA0 << std::endl;
+        << "  eelFreq=" << p.eelFreq
+        << "  eelA0=" << p.eelA0 << std::endl;
   clout << "IBM(v7): alphaIBM=" << alphaIBM
         << "  ibmIterations=" << ibmIterations
-        << "  legacyKappaInput=" << (legacyKappaInputUsed ? 1 : 0)
         << "  meanResidualSlip=" << steady.meanResidualSlip
         << "  maxResidualSlip=" << steady.maxResidualSlip << std::endl;
   if (bodyKinematics == BodyKinematics::SoftBackbone) {

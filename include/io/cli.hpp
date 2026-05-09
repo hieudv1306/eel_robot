@@ -12,7 +12,6 @@ struct RunConfig {
   StudyMode studyMode = StudyMode::Standard;
   SimulationCase simCase = SimulationCase::SurgeOnly;
   WarmupMode warmupMode = WarmupMode::Rest;
-  GaitNormalization gaitNormalization = GaitNormalization::Fixed;
   WallBoundary wallBoundary = WallBoundary::NoSlip;
   bool exportVelocity = true;
   bool exportVorticity = true;
@@ -20,7 +19,6 @@ struct RunConfig {
   bool exportBody = true;
   BodyKinematics bodyKinematics = BodyKinematics::PrescribedWave;
   bool softBackboneDynamics = false;
-  SoftBackboneIntegrator softBackboneIntegrator = SoftBackboneIntegrator::Implicit;
   T softBackboneRelaxationTime = 0.05;
   T softBackboneFluidTorqueScale = 1.0;
   T softBackboneMaxAngleStep = 0.02;
@@ -36,11 +34,6 @@ struct RunConfig {
   int softBackboneAbortSaturatedFrames = 3;
   T alphaIBM = 1.0;
   int ibmIterations = 1;
-  bool legacyKappaInputUsed = false;
-  T legacyKappaInputValue = 0.0;
-  T targetSt = -1.0;
-  T referenceU = -1.0;
-  T tailAmpRatioTarget = -1.0;
   T tCut = -1.0;
   std::string summaryCsv;
   std::string sensitivityCsv;

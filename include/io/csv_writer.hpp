@@ -27,7 +27,6 @@ struct SummaryCsvInputs {
   CycleConvergence cycleConv;
   SimulationCase simCase = SimulationCase::SurgeOnly;
   WarmupMode warmupMode = WarmupMode::Rest;
-  GaitNormalization gaitNormalization = GaitNormalization::Fixed;
   WallBoundary wallBoundary = WallBoundary::NoSlip;
   BodyKinematics bodyKinematics = BodyKinematics::PrescribedWave;
   bool initialPlacementClamped = false;
@@ -42,10 +41,7 @@ struct SummaryCsvInputs {
   T bodyWidth = 0;
   T mass = 0;
   T Ibody = 0;
-  T effectiveEelFreq = 0;
-  T effectiveEelA0 = 0;
   T alphaIBM = 0;
-  bool legacyKappaInputUsed = false;
   int ibmIterations = 1;
   bool softBackboneDynamics = false;
   T softBackboneRelaxationTime = 0;
@@ -65,16 +61,12 @@ struct VerificationCsvInputs {
   SimulationCase simCase = SimulationCase::SurgeOnly;
   StudyMode studyMode = StudyMode::Standard;
   WarmupMode warmupMode = WarmupMode::Rest;
-  GaitNormalization gaitNormalization = GaitNormalization::Fixed;
   WallBoundary wallBoundary = WallBoundary::NoSlip;
   BodyKinematics bodyKinematics = BodyKinematics::PrescribedWave;
   bool initialPlacementClamped = false;
   std::uint64_t initialPlacementClampCount = 0;
-  bool speedClampHit = false;
   bool runtimeDomainClampHit = false;
-  std::uint64_t speedClampCount = 0;
   std::uint64_t runtimeDomainClampCount = 0;
-  std::uint64_t omegaClampCount = 0;
   int nx = 0;
   int ny = 0;
   T dtLbm = 0;
@@ -84,10 +76,7 @@ struct VerificationCsvInputs {
   T bodyWidth = 0;
   T mass = 0;
   T Ibody = 0;
-  T effectiveEelFreq = 0;
-  T effectiveEelA0 = 0;
   T alphaIBM = 0;
-  bool legacyKappaInputUsed = false;
   int ibmIterations = 1;
   bool softBackboneDynamics = false;
   T softBackboneRelaxationTime = 0;

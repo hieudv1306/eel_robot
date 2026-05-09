@@ -133,10 +133,7 @@ std::string makeBaseRunId(const EelParams& p, SimulationCase simCase,
   std::string runId = std::string("case_") + simulationCaseName(simCase)
                     + "_AR" + formatValueForRunId(p.aspectRatio)
                     + "_tau" + formatValueForRunId(p.tau)
-                    + "_kap" + formatValueForRunId(p.kappa)
                     + "_sub" + std::to_string(p.substeps)
-                    + "_kin_" + sanitizePathToken(
-                        geometryKinematicsName(p.geometryKinematics))
                     + "_wave_" + sanitizePathToken(
                         waveDirectionName(p.waveDirection))
                     + "_body_" + sanitizePathToken(

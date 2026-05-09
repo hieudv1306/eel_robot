@@ -7,7 +7,7 @@ RunConfig parseCommandLine(int argc, char* argv[], const std::string& baseLogDir
 {
   RunConfig config;
   config.summaryCsv = baseLogDir + "eel3dof_ar_summary.csv";
-  config.sensitivityCsv = baseLogDir + "eel3dof_kappa_sensitivity_summary.csv";
+  config.sensitivityCsv = baseLogDir + "eel3dof_sensitivity_summary.csv";
 
   for (int i = 1; i < argc; ++i) {
     std::string arg(argv[i]);
@@ -56,12 +56,6 @@ RunConfig parseCommandLine(int argc, char* argv[], const std::string& baseLogDir
       config.p.useAspectRatioGeometry = parseBool(val);
       config.aspectGeometryOverride = true;
     }
-    if (key == "--kappa") {
-      config.p.kappa = std::stod(val);
-      config.legacyKappaInputUsed = true;
-      config.legacyKappaInputValue = config.p.kappa;
-      config.alphaIBM = config.p.kappa;
-    }
     if (key == "--alphaIBM")      config.alphaIBM = std::stod(val);
     if (key == "--ibmIterations") config.ibmIterations = std::max(1, std::stoi(val));
     if (key == "--nIbmIters")     config.p.nIbmIters = std::stoi(val);
@@ -83,10 +77,6 @@ RunConfig parseCommandLine(int argc, char* argv[], const std::string& baseLogDir
     if (key == "--spongeStrength")config.p.spongeStrength = std::stod(val);
     if (key == "--nWarmup")       config.p.nWarmup = std::stoi(val);
     if (key == "--warmupMode")    config.warmupMode = parseWarmupMode(val);
-    if (key == "--gaitNormalization") config.gaitNormalization = parseGaitNormalization(val);
-    if (key == "--geometryKinematics" || key == "--kinematics") {
-      config.p.geometryKinematics = parseGeometryKinematics(val);
-    }
     if (key == "--bodyKinematics" || key == "--deformationSource") {
       config.bodyKinematics = parseBodyKinematics(val);
     }
@@ -97,10 +87,6 @@ RunConfig parseCommandLine(int argc, char* argv[], const std::string& baseLogDir
     }
     if (key == "--softBackboneDynamics") {
       config.softBackboneDynamics = parseBool(val);
-    }
-    if (key == "--softBackboneIntegrator" ||
-        key == "--softBackboneOrder") {
-      config.softBackboneIntegrator = parseSoftBackboneIntegrator(val);
     }
     if (key == "--softBackboneRelaxationTime") {
       config.softBackboneRelaxationTime = std::stod(val);
@@ -128,9 +114,6 @@ RunConfig parseCommandLine(int argc, char* argv[], const std::string& baseLogDir
         std::max(1, std::stoi(val));
     }
     if (key == "--wallBoundary")  config.wallBoundary = parseWallBoundary(val);
-    if (key == "--tailAmpRatioTarget") config.tailAmpRatioTarget = std::stod(val);
-    if (key == "--targetSt")      config.targetSt = std::stod(val);
-    if (key == "--referenceU")    config.referenceU = std::stod(val);
   }
 
   return config;

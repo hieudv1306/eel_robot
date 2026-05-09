@@ -31,11 +31,8 @@
 
 // Minimal adequacy check for steady-window averaging in verification sweeps.
 // This is only an audit flag; it is not a substitute for convergence testing.
-int recommendedSteadySampleCount(const EelParams& p, SimulationCase simCase)
+int recommendedSteadySampleCount(const EelParams& p)
 {
-  if (simCase == SimulationCase::FixedInflow) {
-    return 10;
-  }
   if (!(p.dtAnim > T(0))) {
     return 10;
   }

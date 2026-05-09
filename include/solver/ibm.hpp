@@ -78,7 +78,7 @@ struct IbmResult {
 //    * dt_effective = 1.0 — Newton-Euler and gait integration in this file
 //      operate with δt = 1 lattice step throughout.  The "physicalized"
 //      coefficient alphaIBM therefore equals the classical penalty gain in
-//      the non-dimensional setting (alphaIBM=2 ≡ legacy --kappa=2).
+//      the non-dimensional setting.
 //
 //  Multi direct forcing iterations (Wang & Zhang 2011 style, Eulerian-buffer
 //  approximation):

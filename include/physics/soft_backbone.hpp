@@ -127,14 +127,6 @@ SoftBackboneState extrapolateBackboneState(
     const SoftBackboneState& state,
     T dt);
 
-SoftBackboneDynamicsDiagnostics advanceSoftBackboneOverdamped(
-    const SoftBackboneConfig& config,
-    const SoftBackboneState& preferred,
-    const std::vector<T>& fluidSegmentTorqueNm,
-    T dt,
-    const SoftBackboneDynamicsParams& params,
-    SoftBackboneState& state);
-
 // Implicit Euler advance of segment angles with proper inertia, joint
 // stiffness K_theta = EI/ds, and joint damping C_theta from the material
 // damping ratio.  Pins segment 0 to the preferred state to remove the

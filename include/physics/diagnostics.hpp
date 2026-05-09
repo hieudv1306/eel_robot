@@ -82,7 +82,7 @@ struct CycleConvergence {
   bool cycleConverged = false;
 };
 
-int recommendedSteadySampleCount(const EelParams& p, SimulationCase simCase);
+int recommendedSteadySampleCount(const EelParams& p);
 
 SteadySummary computeSteadySummary(
     const std::vector<T>& t,

@@ -52,32 +52,11 @@ std::vector<T> samplePreferredSegmentAngles(
   if (!config.valid || config.nSegments <= 0) {
     return theta;
   }
-
-  if (p.geometryKinematics == GeometryKinematics::InextensibleWave) {
-    for (int i = 0; i < config.nSegments; ++i) {
-      const T fraction = (T(i) + T(0.5)) / T(config.nSegments);
-      theta[i] =
-        std::atan(samplePreferredWave(p, fraction, t,
-                                      externalAmpScale).slope);
-    }
-    return theta;
-  }
-
-  const int nNodes = config.nSegments + 1;
-  std::vector<T> x(nNodes), y(nNodes);
-  const T paramLength = std::max(p.eelLength, T(1e-12));
-  const T physicalScale = config.centerlineLengthM / paramLength;
-  for (int i = 0; i < nNodes; ++i) {
-    const T fraction = T(i) / T(config.nSegments);
-    const T s = fraction * paramLength;
-    const WaveSample wave =
-      samplePreferredWave(p, fraction, t, externalAmpScale);
-    x[i] = physicalScale * (s - T(0.5) * paramLength);
-    y[i] = physicalScale * wave.yNorm;
-  }
-
   for (int i = 0; i < config.nSegments; ++i) {
-    theta[i] = std::atan2(y[i + 1] - y[i], x[i + 1] - x[i]);
+    const T fraction = (T(i) + T(0.5)) / T(config.nSegments);
+    theta[i] =
+      std::atan(samplePreferredWave(p, fraction, t,
+                                    externalAmpScale).slope);
   }
   return theta;
 }
@@ -442,80 +421,6 @@ SoftBackboneState extrapolateBackboneState(
     out.theta[i] = wrapAngle(out.theta[i] + out.omega[i] * dt);
   }
   return out;
-}
-
-SoftBackboneDynamicsDiagnostics advanceSoftBackboneOverdamped(
-    const SoftBackboneConfig& config,
-    const SoftBackboneState& preferred,
-    const std::vector<T>& fluidSegmentTorqueNm,
-    T dt,
-    const SoftBackboneDynamicsParams& params,
-    SoftBackboneState& state)
-{
-  SoftBackboneDynamicsDiagnostics diag;
-  const int nSegments = config.nSegments;
-  if (!config.valid || nSegments < 2 || !(dt > T(0)) ||
-      static_cast<int>(state.theta.size()) != nSegments ||
-      static_cast<int>(state.omega.size()) != nSegments ||
-      static_cast<int>(preferred.theta.size()) != nSegments ||
-      static_cast<int>(preferred.omega.size()) != nSegments ||
-      static_cast<int>(fluidSegmentTorqueNm.size()) != nSegments ||
-      !(config.jointAngleStiffnessNm > T(0))) {
-    return diag;
-  }
-
-  const T relax = std::max(params.relaxationTime, dt);
-  const T blend = std::clamp(dt / relax, T(0), T(1));
-  const T maxStep = (params.maxAngleStep > T(0))
-                  ? params.maxAngleStep : T(1e30);
-
-  std::vector<T> targetJointAngle(nSegments - 1, T(0));
-  for (int j = 0; j < nSegments - 1; ++j) {
-    const T qPreferred = wrapAngle(preferred.theta[j + 1] -
-                                   preferred.theta[j]);
-    const T fluidGeneralizedTorque =
-      params.fluidTorqueScale *
-      (fluidSegmentTorqueNm[j + 1] - fluidSegmentTorqueNm[j]);
-    diag.maxAbsFluidSegmentTorqueNm =
-      std::max(diag.maxAbsFluidSegmentTorqueNm,
-               std::max(std::abs(fluidSegmentTorqueNm[j]),
-                        std::abs(fluidSegmentTorqueNm[j + 1])));
-    const T curvatureOffset =
-      fluidGeneralizedTorque / config.bendingStiffnessNm2;
-    diag.maxAbsTargetCurvatureOffset =
-      std::max(diag.maxAbsTargetCurvatureOffset,
-               std::abs(curvatureOffset));
-    targetJointAngle[j] =
-      qPreferred + curvatureOffset * config.dsM;
-  }
-
-  // Pin segment 0 to the preferred state.  This removes the rigid-rotation
-  // null space (uniform offset in theta is a kinematic invariant of the
-  // joint-angle stiffness operator) without the meanError drift correction
-  // that the previous version applied to the whole segment array.  The
-  // rigid-body theta absorbs net rotation separately.
-  std::vector<T> targetTheta(nSegments, T(0));
-  targetTheta[0] = preferred.theta[0];
-  for (int i = 1; i < nSegments; ++i) {
-    targetTheta[i] = targetTheta[i - 1] + targetJointAngle[i - 1];
-  }
-
-  state.theta[0] = preferred.theta[0];
-  state.omega[0] = preferred.omega[0];
-  diag.maxAbsAngleStep = std::max(diag.maxAbsAngleStep,
-                                   std::abs(preferred.omega[0] * dt));
-
-  for (int i = 1; i < nSegments; ++i) {
-    T step = blend * wrapAngle(targetTheta[i] - state.theta[i]);
-    step = std::clamp(step, -maxStep, maxStep);
-    state.omega[i] = step / dt;
-    state.theta[i] = wrapAngle(state.theta[i] + step);
-    diag.maxAbsAngleStep = std::max(diag.maxAbsAngleStep, std::abs(step));
-    diag.maxAbsAngleErrorRad =
-      std::max(diag.maxAbsAngleErrorRad,
-               std::abs(wrapAngle(state.theta[i] - preferred.theta[i])));
-  }
-  return diag;
 }
 
 SoftBackboneDynamicsDiagnostics advanceSoftBackboneImplicit(

@@ -49,7 +49,6 @@ python3 scripts/run_ar_sweep.py --aspect-ratio 7 9 11 \
   --body-area=1078.5398163397449 --tag-prefix=soft_ar \
   -- --case=surge_only --wallBoundary=freeslip \
   --bodyKinematics=soft_backbone \
-  --geometryKinematics=inextensible_wave \
   --waveDirection=tail_to_head \
   --softBackboneDynamics=true \
   --softBackboneFluidTorqueScale=0.01 \
@@ -97,7 +96,7 @@ soft-backbone state instead of the legacy direct prescribed-wave marker path:
 
 ```sh
 ./11_lbm_eel_3dof --case=surge_only --bodyKinematics=soft_backbone \
-  --material=dragon_skin_20 --geometryKinematics=inextensible_wave
+  --material=dragon_skin_20
 ```
 
 This is a transitional coupling mode: the marker geometry comes from the
@@ -112,22 +111,17 @@ the body-forward convention.  With the current body frame, forward swimming at
 An experimental fluid-loaded backbone update can be enabled with
 `--softBackboneDynamics=true`.  It projects IBM surface reactions to backbone
 segment torques, converts lattice torque to SI using the configured physical
-length/thickness scale, and advances the backbone with one of two
-integrators selected by `--softBackboneIntegrator`:
-
-* `implicit` (default): 2nd-order Newton-Euler with proper segment inertia,
-  joint stiffness `K_theta = EI/ds`, and joint damping from the material
-  damping ratio.  Implicit Euler in time, tridiagonal solve per substep,
-  unconditionally stable for the stiff Dragon Skin K_theta.  Captures
-  inertia and phase lag with respect to the gait.  Pin segment 0 to the
-  preferred state to remove the rigid-rotation null space.
-* `overdamped` (legacy): 1st-order relaxation toward a fluid-shifted
-  preferred-curvature target.  Cheap and robust; ignores segment inertia.
+length/thickness scale, and advances the backbone with a 2nd-order
+Newton-Euler integrator: proper segment inertia, joint stiffness
+`K_theta = EI/ds`, joint damping from the material damping ratio, implicit
+Euler in time with a tridiagonal solve per substep — unconditionally stable
+for the stiff Dragon Skin K_theta and captures inertia and phase lag with
+respect to the gait.  Segment 0 is pinned to the preferred state to remove
+the rigid-rotation null space.
 
 ```sh
 ./11_lbm_eel_3dof --bodyKinematics=soft_backbone \
   --softBackboneDynamics=true \
-  --softBackboneIntegrator=implicit \
   --softBackboneFluidTorqueScale=0.01 \
   --softBackboneAddedMassFrac=1 \
   --softBackboneMaxAngleStep=0.5

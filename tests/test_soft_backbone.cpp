@@ -93,25 +93,6 @@ int main() {
     computeSoftBackboneTorques(config, shearing, zeroPreferred);
   assert(damped.maxAbsJointMomentNm > 0.0);
 
-  SoftBackboneState dynamicState = straight;
-  SoftBackboneDynamicsParams dynParams;
-  dynParams.relaxationTime = 0.10;
-  dynParams.maxAngleStep = 0.01;
-  std::vector<T> zeroFluid(config.nSegments, 0.0);
-  const SoftBackboneDynamicsDiagnostics dynDiag =
-    advanceSoftBackboneOverdamped(config, preferredState, zeroFluid,
-                                  0.001, dynParams, dynamicState);
-  assert(dynDiag.maxAbsAngleStep > 0.0);
-  assert(dynamicState.theta.size() == static_cast<size_t>(config.nSegments));
-
-  std::vector<T> fluid(config.nSegments, 0.0);
-  fluid.front() = 0.01;
-  fluid.back() = -0.01;
-  const SoftBackboneDynamicsDiagnostics fluidDiag =
-    advanceSoftBackboneOverdamped(config, preferredState, fluid,
-                                  0.001, dynParams, dynamicState);
-  assert(fluidDiag.maxAbsFluidSegmentTorqueNm > 0.0);
-
   // ----- Implicit (2nd-order Newton-Euler) integrator invariants -----
   // (a) Static equilibrium: preferred at rest (zero theta, zero omega) is a
   //     fixed point of the implicit Euler operator with no fluid load.  A

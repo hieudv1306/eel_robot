@@ -31,65 +31,33 @@ BodyInertia computeBodyInertia(const EelParams& p, T rhoBody)
   return out;
 }
 
-void enforceModeDefinitionState(SimulationCase simCase,
-                                const BodyReferenceState& reference,
+// Surge-only rigid-body model: only Vx is a dynamic state, heave/yaw are
+// pinned to the reference pose by definition.
+void enforceModeDefinitionState(const BodyReferenceState& reference,
                                 BodyState& state)
 {
-  if (simCase == SimulationCase::FixedInflow ||
-      simCase == SimulationCase::FixedUndulation) {
-    state.Vx = state.Vy = state.omegaZ = T(0);
-    state.xCm = reference.xCm;
-    state.yCm = reference.yCm;
-    state.theta = reference.theta;
-  } else if (simCase == SimulationCase::SurgeOnly) {
-    state.Vy = T(0);
-    state.omegaZ = T(0);
-    state.yCm = reference.yCm;
-    state.theta = reference.theta;
-  }
+  state.Vy = T(0);
+  state.omegaZ = T(0);
+  state.yCm = reference.yCm;
+  state.theta = reference.theta;
 }
 
-void applyRigidBodyForceUpdate(SimulationCase simCase,
-                               T tKinematics,
+void applyRigidBodyForceUpdate(T tKinematics,
                                T restTime,
                                T fxS,
-                               T fyS,
-                               T tzS,
                                const BodyInertia& inertia,
                                BodyState& state)
 {
   if (tKinematics < restTime) {
     return;
   }
-  if (simCase == SimulationCase::SurgeOnly) {
-    state.Vx += fxS / inertia.Msurge;
-  } else if (simCase == SimulationCase::Full3Dof) {
-    state.Vx     += fxS / inertia.Msurge;
-    state.Vy     += fyS / inertia.Mheave;
-    state.omegaZ += tzS / inertia.Itotal;
-  }
+  state.Vx += fxS / inertia.Msurge;
 }
 
-void advanceRigidBodyPose(SimulationCase simCase,
-                          const BodyReferenceState& reference,
+void advanceRigidBodyPose(const BodyReferenceState& reference,
                           BodyState& state)
 {
-  if (simCase == SimulationCase::FixedInflow ||
-      simCase == SimulationCase::FixedUndulation) {
-    state.xCm = reference.xCm;
-    state.yCm = reference.yCm;
-    state.theta = reference.theta;
-  } else if (simCase == SimulationCase::SurgeOnly) {
-    state.xCm += state.Vx;
-    state.yCm = reference.yCm;
-    state.theta = reference.theta;
-  } else if (simCase == SimulationCase::Full3Dof) {
-    state.xCm += state.Vx;
-    state.yCm += state.Vy;
-    state.theta += state.omegaZ;
-
-    state.theta = std::fmod(state.theta + M_PI, 2.0 * M_PI);
-    if (state.theta < 0) state.theta += 2.0 * M_PI;
-    state.theta -= M_PI;
-  }
+  state.xCm += state.Vx;
+  state.yCm = reference.yCm;
+  state.theta = reference.theta;
 }
