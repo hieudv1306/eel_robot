@@ -147,28 +147,32 @@ fluid-torque scales and will diverge as the scale grows.
 
 `--softBackboneAddedMassFrac` lumps a fraction of the slender-body theoretical
 added rotational inertia into each segment to widen the stable operating
-window.  The verified-stable starting point at the calibration grid
-(600x180, eelScale=60, bodyRadius=4, nSpine=100, substeps=20) is:
+window.  Stability map re-calibrated 2026-05-09 against the
+post-Issue-1 trapezoidal centerline walk at the calibration grid
+(600x180, eelScale=60, bodyRadius=4, nSpine=100, substeps=20), via
+`Ttotal=2` smokes that brackets the smallest stable `frac` per scale:
 
-| `--softBackboneFluidTorqueScale` | `--softBackboneAddedMassFrac` |
+| `--softBackboneFluidTorqueScale` | min stable `--softBackboneAddedMassFrac` |
 |---|---|
-| 0.01  | 1 (theoretical) |
+| 0.001 | 1 (theoretical) |
+| 0.01  | 1 |
+| 0.05  | 10  (DIVERGE@7,  STABLE@10) |
+| 0.1   | 25  (DIVERGE@20, STABLE@25) |
+| 1.0   | 400 (DIVERGE@300, STABLE@400) |
 
-This was re-verified end-to-end over 8 s of physical time after the
-Issue 1 trapezoidal-centerline fix (commit af00dc9): the run completes
-without hitting the instability guard, post-`tCut=4` mean residual slip
-is ~0.0056, and `maxSoftAngleStep` stays well below the 0.5 limiter.
+Issue 1 fix shifted the boundary by ~2-2.5x at moderate scales (the
+trapezoidal node-tangent walk transmits a slightly larger phase-correct
+fluid torque to the backbone tail).  At scale=0.01 the run was further
+re-verified end-to-end over 8 s with post-`tCut=4` mean residual slip
+~0.0056 and `maxSoftAngleStep` well below the 0.5 limiter, which is
+the recommended starting point for production sweeps.  Pick `frac`
+slightly above the table to leave margin -- the 2 s smoke is a
+necessary, not sufficient, stability check for longer runs.
 
-Higher torque scales were previously documented with a stability table
-(`scale=0.05` -> `frac>=5`, `scale=0.1` -> `frac>=10`, `scale=1.0` ->
-`frac>=300`).  That table was calibrated against the pre-Issue-1
-segment-midpoint marker geometry and is **stale** with the current
-trapezoidal walk: at the same `(scale, frac)` pairs the partitioned
-coupling now diverges in the first few frames, so those entries need to
-be re-calibrated before relying on them.  Pushing frac high enough to
-stabilise `scale=1` previously made the backbone effectively rigid, so
-for genuine full-coupling FSI a strong-coupling sub-iteration is the
-proper fix; the added-mass knob is a partitioned-scheme work-around.
+Pushing `frac` high enough to stabilise `scale=1` (>=400 here) leaves
+the backbone effectively rigid; for genuine full-coupling FSI a
+strong-coupling sub-iteration is the proper fix, the added-mass knob
+is a partitioned-scheme work-around.
 
 The default instability guard aborts a run before NaNs are written when slip
 grows far beyond IBM warning levels or when the soft angle-step limiter
