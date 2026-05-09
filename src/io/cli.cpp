@@ -92,6 +92,10 @@ RunConfig parseCommandLine(int argc, char* argv[], const std::string& baseLogDir
     if (key == "--softBackboneDynamics") {
       config.softBackboneDynamics = parseBool(val);
     }
+    if (key == "--softBackboneIntegrator" ||
+        key == "--softBackboneOrder") {
+      config.softBackboneIntegrator = parseSoftBackboneIntegrator(val);
+    }
     if (key == "--softBackboneRelaxationTime") {
       config.softBackboneRelaxationTime = std::stod(val);
     }

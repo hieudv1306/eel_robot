@@ -66,21 +66,36 @@ the body-forward convention.  With the current body frame, forward swimming at
 An experimental fluid-loaded backbone update can be enabled with
 `--softBackboneDynamics=true`.  It projects IBM surface reactions to backbone
 segment torques, converts lattice torque to SI using the configured physical
-length/thickness scale, and advances the backbone with an overdamped
-preferred-curvature relaxation:
+length/thickness scale, and advances the backbone with one of two
+integrators selected by `--softBackboneIntegrator`:
+
+* `implicit` (default): 2nd-order Newton-Euler with proper segment inertia,
+  joint stiffness `K_theta = EI/ds`, and joint damping from the material
+  damping ratio.  Implicit Euler in time, tridiagonal solve per substep,
+  unconditionally stable for the stiff Dragon Skin K_theta.  Captures
+  inertia and phase lag with respect to the gait.  Pin segment 0 to the
+  preferred state to remove the rigid-rotation null space.
+* `overdamped` (legacy): 1st-order relaxation toward a fluid-shifted
+  preferred-curvature target.  Cheap and robust; ignores segment inertia.
 
 ```sh
 ./11_lbm_eel_3dof --bodyKinematics=soft_backbone \
   --softBackboneDynamics=true \
+  --softBackboneIntegrator=implicit \
   --softBackboneRelaxationTime=0.05 \
   --softBackboneFluidTorqueScale=1.0 \
   --softBackboneMaxAngleStep=0.02
 ```
 
-This is intentionally conservative and should be validated with short smoke
-runs before long AR or efficiency runs.  The history and summary CSVs include
-the coupling settings plus `meanSoftFluidTorqueNm`, `maxSoftFluidTorqueNm`,
-`meanSoftAngleStep`, and `maxSoftAngleStep` for post-run checks.
+The history and summary CSVs include the coupling settings plus
+`meanSoftFluidTorqueNm`, `maxSoftFluidTorqueNm`, `meanSoftAngleStep`, and
+`maxSoftAngleStep` for post-run checks.
+
+Caveat: with `softBackboneFluidTorqueScale=1.0` the implicit integrator can
+exhibit positive-feedback growth between IBM slip and backbone deflection
+during the gait ramp-up.  Start with sub-unit `fluidTorqueScale`, longer
+`rampTime`, or smaller `dtAnim/substeps` and increase scale toward 1.0 once
+the residual slip diagnostic stays bounded.
 
 ## Layout
 

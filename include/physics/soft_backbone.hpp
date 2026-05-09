@@ -62,6 +62,7 @@ struct SoftBackboneDynamicsDiagnostics {
   T maxAbsFluidSegmentTorqueNm = 0.0;
   T maxAbsTargetCurvatureOffset = 0.0;
   T maxAbsAngleStep = 0.0;
+  T maxAbsAngleErrorRad = 0.0;
 };
 
 SoftBackboneConfig makeSoftBackboneConfig(
@@ -107,6 +108,21 @@ SoftBackboneState extrapolateBackboneState(
     T dt);
 
 SoftBackboneDynamicsDiagnostics advanceSoftBackboneOverdamped(
+    const SoftBackboneConfig& config,
+    const SoftBackboneState& preferred,
+    const std::vector<T>& fluidSegmentTorqueNm,
+    T dt,
+    const SoftBackboneDynamicsParams& params,
+    SoftBackboneState& state);
+
+// Implicit Euler advance of segment angles with proper inertia, joint
+// stiffness K_theta = EI/ds, and joint damping C_theta from the material
+// damping ratio.  Pins segment 0 to the preferred state to remove the
+// rigid-rotation null space (the rigid-body theta absorbs net rotation).
+// The system is tridiagonal in (N-1) interior segment angular velocities
+// and is solved with Thomas elimination, so cost is O(N) per step and the
+// scheme is unconditionally stable for stiff K_theta.
+SoftBackboneDynamicsDiagnostics advanceSoftBackboneImplicit(
     const SoftBackboneConfig& config,
     const SoftBackboneState& preferred,
     const std::vector<T>& fluidSegmentTorqueNm,

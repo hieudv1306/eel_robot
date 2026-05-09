@@ -140,6 +140,28 @@ inline const char* bodyKinematicsName(BodyKinematics k) {
        ? "soft_backbone" : "prescribed_wave";
 }
 
+// Soft-backbone time-integration scheme.
+//   Overdamped : 1st-order relaxation toward the (fluid-offset) preferred
+//                joint angles.  Cheap, robust, but ignores segment inertia
+//                and only sees fluid loads as a quasi-static curvature shift.
+//   Implicit   : 2nd-order Newton-Euler on segment angles with implicit
+//                Euler in time; tridiagonal solve, unconditionally stable
+//                for the stiff Dragon Skin K_theta.  Captures inertia and
+//                phase lag with respect to the gait.
+enum class SoftBackboneIntegrator { Overdamped, Implicit };
+
+inline SoftBackboneIntegrator parseSoftBackboneIntegrator(const std::string& s) {
+  if (s == "overdamped" || s == "first_order" || s == "1") {
+    return SoftBackboneIntegrator::Overdamped;
+  }
+  return SoftBackboneIntegrator::Implicit;
+}
+
+inline const char* softBackboneIntegratorName(SoftBackboneIntegrator s) {
+  return (s == SoftBackboneIntegrator::Overdamped)
+       ? "overdamped" : "implicit";
+}
+
 // Body material used for inertia and soft-body stiffness estimates.
 enum class BodyMaterial { NeutralLattice, DragonSkin20 };
 

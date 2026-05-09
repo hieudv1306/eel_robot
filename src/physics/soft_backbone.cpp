@@ -426,27 +426,177 @@ SoftBackboneDynamicsDiagnostics advanceSoftBackboneOverdamped(
       qPreferred + curvatureOffset * config.dsM;
   }
 
+  // Pin segment 0 to the preferred state.  This removes the rigid-rotation
+  // null space (uniform offset in theta is a kinematic invariant of the
+  // joint-angle stiffness operator) without the meanError drift correction
+  // that the previous version applied to the whole segment array.  The
+  // rigid-body theta absorbs net rotation separately.
   std::vector<T> targetTheta(nSegments, T(0));
   targetTheta[0] = preferred.theta[0];
   for (int i = 1; i < nSegments; ++i) {
     targetTheta[i] = targetTheta[i - 1] + targetJointAngle[i - 1];
   }
 
-  T meanError = T(0);
-  for (int i = 0; i < nSegments; ++i) {
-    meanError += wrapAngle(targetTheta[i] - preferred.theta[i]);
-  }
-  meanError /= T(nSegments);
-  for (int i = 0; i < nSegments; ++i) {
-    targetTheta[i] = wrapAngle(targetTheta[i] - meanError);
-  }
+  state.theta[0] = preferred.theta[0];
+  state.omega[0] = preferred.omega[0];
+  diag.maxAbsAngleStep = std::max(diag.maxAbsAngleStep,
+                                   std::abs(preferred.omega[0] * dt));
 
-  for (int i = 0; i < nSegments; ++i) {
+  for (int i = 1; i < nSegments; ++i) {
     T step = blend * wrapAngle(targetTheta[i] - state.theta[i]);
     step = std::clamp(step, -maxStep, maxStep);
     state.omega[i] = step / dt;
     state.theta[i] = wrapAngle(state.theta[i] + step);
     diag.maxAbsAngleStep = std::max(diag.maxAbsAngleStep, std::abs(step));
+    diag.maxAbsAngleErrorRad =
+      std::max(diag.maxAbsAngleErrorRad,
+               std::abs(wrapAngle(state.theta[i] - preferred.theta[i])));
+  }
+  return diag;
+}
+
+SoftBackboneDynamicsDiagnostics advanceSoftBackboneImplicit(
+    const SoftBackboneConfig& config,
+    const SoftBackboneState& preferred,
+    const std::vector<T>& fluidSegmentTorqueNm,
+    T dt,
+    const SoftBackboneDynamicsParams& params,
+    SoftBackboneState& state)
+{
+  SoftBackboneDynamicsDiagnostics diag;
+  const int nSegments = config.nSegments;
+  if (!config.valid || nSegments < 2 || !(dt > T(0)) ||
+      static_cast<int>(state.theta.size()) != nSegments ||
+      static_cast<int>(state.omega.size()) != nSegments ||
+      static_cast<int>(preferred.theta.size()) != nSegments ||
+      static_cast<int>(preferred.omega.size()) != nSegments ||
+      static_cast<int>(fluidSegmentTorqueNm.size()) != nSegments ||
+      !(config.jointAngleStiffnessNm > T(0)) ||
+      !(config.segmentRotationalInertiaKgM2 > T(0))) {
+    return diag;
+  }
+
+  const int nInterior = nSegments - 1;  // segments 1..N-1
+  const int nJoints = nSegments - 1;    // joints 0..N-2
+
+  const T I = config.segmentRotationalInertiaKgM2;
+  const T K = config.jointAngleStiffnessNm;
+  const T C = config.jointAngleDampingNms;
+  const T A = K * dt + C;
+  const T diagBase = I / dt;
+  const T fluidScale = params.fluidTorqueScale;
+  const T maxStep = (params.maxAngleStep > T(0))
+                  ? params.maxAngleStep : T(1e30);
+
+  // Track raw fluid torque magnitudes for diagnostics (independent of scale).
+  for (int i = 0; i < nSegments; ++i) {
+    diag.maxAbsFluidSegmentTorqueNm =
+      std::max(diag.maxAbsFluidSegmentTorqueNm,
+               std::abs(fluidSegmentTorqueNm[i]));
+  }
+
+  // RHS_j = K (theta_{j+1}^n - theta_j^n - q_pref_j) - C * qdot_pref_j,
+  // i.e. the part of joint moment M_j^{n+1} that is independent of omega^{n+1}
+  // after substituting theta^{n+1} = theta^n + dt * omega^{n+1}.
+  std::vector<T> rhsJoint(nJoints, T(0));
+  for (int j = 0; j < nJoints; ++j) {
+    const T qPref = wrapAngle(preferred.theta[j + 1] - preferred.theta[j]);
+    const T qDotPref = preferred.omega[j + 1] - preferred.omega[j];
+    const T thetaDiff = wrapAngle(state.theta[j + 1] - state.theta[j]);
+    rhsJoint[j] = K * (thetaDiff - qPref) - C * qDotPref;
+    diag.maxAbsTargetCurvatureOffset =
+      std::max(diag.maxAbsTargetCurvatureOffset,
+               std::abs(qPref) / std::max(config.dsM, T(1e-30)));
+  }
+
+  // Pin segment 0 kinematically.
+  const T omega0Pinned = preferred.omega[0];
+  const T theta0Pinned = preferred.theta[0];
+
+  // Solve tridiagonal system for omega_i^{n+1}, i = 1..N-1.
+  // Variables indexed locally as k = i - 1, k = 0..nInterior-1.
+  //   sub_k * omega_{k-1} + diag_k * omega_k + sup_k * omega_{k+1} = rhs_k
+  std::vector<T> sub(nInterior, T(0));
+  std::vector<T> dia(nInterior, T(0));
+  std::vector<T> sup(nInterior, T(0));
+  std::vector<T> rhs(nInterior, T(0));
+
+  for (int k = 0; k < nInterior; ++k) {
+    const int i = k + 1;
+    const bool isLast = (i == nSegments - 1);
+    const T fluid = fluidScale * fluidSegmentTorqueNm[i];
+
+    if (isLast) {
+      // Segment N-1: tau_int = -M_{N-2}, only.
+      //   I/dt omega_{N-1} + A (omega_{N-1} - omega_{N-2}) = I/dt omega_{N-1}^n
+      //                                                    + tau_ext - rhsJoint_{N-2}
+      sub[k] = -A;
+      dia[k] = diagBase + A;
+      sup[k] = T(0);
+      rhs[k] = diagBase * state.omega[i] + fluid - rhsJoint[i - 1];
+    } else {
+      // Interior segment: tau_int = M_i - M_{i-1}.
+      //   -A omega_{i-1} + (I/dt + 2A) omega_i - A omega_{i+1}
+      //     = I/dt omega_i^n + tau_ext + rhsJoint_i - rhsJoint_{i-1}
+      sub[k] = -A;
+      dia[k] = diagBase + T(2) * A;
+      sup[k] = -A;
+      rhs[k] = diagBase * state.omega[i] + fluid
+             + rhsJoint[i] - rhsJoint[i - 1];
+    }
+  }
+
+  // Apply the pinned-omega boundary at k=0 (i=1): omega_0 is known, so the
+  // -A * omega_0 contribution moves to the RHS.
+  if (nInterior > 0) {
+    rhs[0] += A * omega0Pinned;
+    sub[0] = T(0);
+  }
+
+  // Thomas elimination (in-place on dia/sup/rhs).
+  for (int k = 1; k < nInterior; ++k) {
+    const T denom = dia[k - 1];
+    if (!(std::abs(denom) > T(1e-30))) {
+      return diag;  // singular — leave state untouched
+    }
+    const T m = sub[k] / denom;
+    dia[k] -= m * sup[k - 1];
+    rhs[k] -= m * rhs[k - 1];
+  }
+  std::vector<T> omegaNew(nInterior, T(0));
+  if (nInterior > 0) {
+    if (!(std::abs(dia[nInterior - 1]) > T(1e-30))) {
+      return diag;
+    }
+    omegaNew[nInterior - 1] = rhs[nInterior - 1] / dia[nInterior - 1];
+    for (int k = nInterior - 2; k >= 0; --k) {
+      if (!(std::abs(dia[k]) > T(1e-30))) {
+        return diag;
+      }
+      omegaNew[k] = (rhs[k] - sup[k] * omegaNew[k + 1]) / dia[k];
+    }
+  }
+
+  // Apply the solution.  Clamp |dt * omega| to maxStep as a numerical
+  // safety; this should normally be inactive once the coupling is healthy.
+  state.theta[0] = theta0Pinned;
+  state.omega[0] = omega0Pinned;
+  diag.maxAbsAngleStep = std::max(diag.maxAbsAngleStep,
+                                   std::abs(omega0Pinned * dt));
+
+  for (int k = 0; k < nInterior; ++k) {
+    const int i = k + 1;
+    T step = omegaNew[k] * dt;
+    if (std::abs(step) > maxStep) {
+      step = (step > T(0)) ? maxStep : -maxStep;
+      omegaNew[k] = step / dt;
+    }
+    state.omega[i] = omegaNew[k];
+    state.theta[i] = wrapAngle(state.theta[i] + step);
+    diag.maxAbsAngleStep = std::max(diag.maxAbsAngleStep, std::abs(step));
+    diag.maxAbsAngleErrorRad =
+      std::max(diag.maxAbsAngleErrorRad,
+               std::abs(wrapAngle(state.theta[i] - preferred.theta[i])));
   }
   return diag;
 }

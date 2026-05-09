@@ -97,4 +97,65 @@ int main() {
     advanceSoftBackboneOverdamped(config, preferredState, fluid,
                                   0.001, dynParams, dynamicState);
   assert(fluidDiag.maxAbsFluidSegmentTorqueNm > 0.0);
+
+  // ----- Implicit (2nd-order Newton-Euler) integrator invariants -----
+  // (a) Static equilibrium: preferred at rest (zero theta, zero omega) is a
+  //     fixed point of the implicit Euler operator with no fluid load.  A
+  //     state initially at this rest state must remain at it bit-for-bit.
+  SoftBackboneState restingPreferredState =
+    makeStraightBackboneState(config.nSegments);
+  SoftBackboneState implicitState = restingPreferredState;
+  SoftBackboneDynamicsParams implicitParams;
+  implicitParams.maxAngleStep = 1.0;  // disable safety clamp for unit test
+  implicitParams.fluidTorqueScale = 0.0;
+  std::vector<T> zeroFluidVec(config.nSegments, 0.0);
+  for (int s = 0; s < 20; ++s) {
+    advanceSoftBackboneImplicit(config, restingPreferredState, zeroFluidVec,
+                                1e-4, implicitParams, implicitState);
+  }
+  T maxRestDrift = 0.0;
+  for (int i = 0; i < config.nSegments; ++i) {
+    maxRestDrift = std::max(maxRestDrift, std::abs(implicitState.theta[i]));
+    maxRestDrift = std::max(maxRestDrift, std::abs(implicitState.omega[i]));
+  }
+  assert(maxRestDrift < 1e-12);
+
+  // (b) With non-trivial preferred and zero fluid, segment 0 must be pinned
+  //     exactly to preferred at every step.
+  SoftBackboneState implicitFromStraight = straight;
+  advanceSoftBackboneImplicit(config, preferredState, zeroFluidVec,
+                              1e-4, implicitParams, implicitFromStraight);
+  assert(std::abs(implicitFromStraight.theta.front() -
+                  preferredState.theta.front()) < 1e-12);
+  assert(std::abs(implicitFromStraight.omega.front() -
+                  preferredState.omega.front()) < 1e-12);
+
+  // (c) Inertia / phase-lag check: relax a perturbation at zero preferred
+  //     with no fluid load — energy must not grow over a short integration
+  //     (numerical dissipation of implicit Euler is harmless here).
+  SoftBackboneState perturbed = restingPreferredState;
+  perturbed.theta[config.nSegments / 2] = 0.05;  // small bend
+  T initialMaxAbs = 0.05;
+  for (int s = 0; s < 50; ++s) {
+    advanceSoftBackboneImplicit(config, restingPreferredState, zeroFluidVec,
+                                1e-4, implicitParams, perturbed);
+  }
+  T finalMaxAbs = 0.0;
+  for (T th : perturbed.theta) {
+    finalMaxAbs = std::max(finalMaxAbs, std::abs(th));
+  }
+  assert(finalMaxAbs <= initialMaxAbs + 1e-9);
+
+  // (d) Fluid torque actually drives joint angle changes when scale > 0.
+  SoftBackboneState forced = preferredState;
+  SoftBackboneDynamicsParams forcedParams = implicitParams;
+  forcedParams.fluidTorqueScale = 1.0;
+  std::vector<T> fluidLoad(config.nSegments, 0.0);
+  fluidLoad[config.nSegments - 2] = 0.001;
+  fluidLoad[config.nSegments - 1] = -0.001;
+  const SoftBackboneDynamicsDiagnostics forcedDiag =
+    advanceSoftBackboneImplicit(config, preferredState, fluidLoad,
+                                1e-4, forcedParams, forced);
+  assert(forcedDiag.maxAbsFluidSegmentTorqueNm > 0.0);
+  assert(forcedDiag.maxAbsAngleStep > 0.0);
 }

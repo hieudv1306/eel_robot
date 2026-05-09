@@ -542,6 +542,8 @@ int main(int argc, char* argv[])
   if (bodyKinematics == BodyKinematics::SoftBackbone) {
     clout << "Soft backbone coupling: dynamics="
           << (softBackboneDynamics ? "enabled" : "disabled")
+          << "  integrator="
+          << softBackboneIntegratorName(config.softBackboneIntegrator)
           << "  relaxationTime=" << config.softBackboneRelaxationTime
           << " s  fluidTorqueScale="
           << config.softBackboneFluidTorqueScale
@@ -869,9 +871,13 @@ int main(int argc, char* argv[])
             p, softBackbone, tKinematics + dtLbm, dtLbm,
             deformationAmpScale());
         const SoftBackboneDynamicsDiagnostics softDynDiag =
-          advanceSoftBackboneOverdamped(
-            softBackbone, preferredNext, softProjection.segmentTorqueNm,
-            dtLbm, softDynamicsParams, softDynamicState);
+          (config.softBackboneIntegrator == SoftBackboneIntegrator::Implicit)
+            ? advanceSoftBackboneImplicit(
+                softBackbone, preferredNext, softProjection.segmentTorqueNm,
+                dtLbm, softDynamicsParams, softDynamicState)
+            : advanceSoftBackboneOverdamped(
+                softBackbone, preferredNext, softProjection.segmentTorqueNm,
+                dtLbm, softDynamicsParams, softDynamicState);
         if (std::isfinite(softDynDiag.maxAbsFluidSegmentTorqueNm) &&
             std::isfinite(softDynDiag.maxAbsAngleStep)) {
           softFluidTorqueAccum += softDynDiag.maxAbsFluidSegmentTorqueNm;

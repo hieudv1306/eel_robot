@@ -16,6 +16,7 @@ struct RunConfig {
   WallBoundary wallBoundary = WallBoundary::NoSlip;
   BodyKinematics bodyKinematics = BodyKinematics::PrescribedWave;
   bool softBackboneDynamics = false;
+  SoftBackboneIntegrator softBackboneIntegrator = SoftBackboneIntegrator::Implicit;
   T softBackboneRelaxationTime = 0.05;
   T softBackboneFluidTorqueScale = 1.0;
   T softBackboneMaxAngleStep = 0.02;
