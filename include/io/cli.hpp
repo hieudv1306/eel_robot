@@ -14,6 +14,10 @@ struct RunConfig {
   WarmupMode warmupMode = WarmupMode::Rest;
   GaitNormalization gaitNormalization = GaitNormalization::Fixed;
   WallBoundary wallBoundary = WallBoundary::NoSlip;
+  bool exportVelocity = true;
+  bool exportVorticity = true;
+  bool exportDiagnostics = true;
+  bool exportBody = true;
   BodyKinematics bodyKinematics = BodyKinematics::PrescribedWave;
   bool softBackboneDynamics = false;
   SoftBackboneIntegrator softBackboneIntegrator = SoftBackboneIntegrator::Implicit;

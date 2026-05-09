@@ -26,6 +26,17 @@ make test
   --sensitivityCsv=tmp/smoke_sensitivity.csv
 ```
 
+## Output Selection
+
+Spatial outputs can be selected independently.  For full-cadence ParaView
+output with only vorticity and body files:
+
+```sh
+./11_lbm_eel_3dof --mode=full \
+  --exportVelocity=false --exportDiagnostics=false \
+  --exportVorticity=true --exportBody=true
+```
+
 ## Aspect-Ratio Sweeps
 
 Use the sweep helper for light, CSV-only verification runs.  It passes

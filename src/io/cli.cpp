@@ -32,6 +32,10 @@ RunConfig parseCommandLine(int argc, char* argv[], const std::string& baseLogDir
     if (key == "--summaryCsv")    config.summaryCsv = val;
     if (key == "--sensitivityCsv") config.sensitivityCsv = val;
     if (key == "--runTag")        config.runTag = val;
+    if (key == "--exportVelocity") config.exportVelocity = parseBool(val);
+    if (key == "--exportVorticity") config.exportVorticity = parseBool(val);
+    if (key == "--exportDiagnostics") config.exportDiagnostics = parseBool(val);
+    if (key == "--exportBody")    config.exportBody = parseBool(val);
     if (key == "--bodyRadius")   { config.p.bodyRadius = std::stod(val); config.rawGeometryOverride = true; }
     if (key == "--eelScale")     { config.p.eelScale = std::stod(val); config.rawGeometryOverride = true; }
     if (key == "--nSpine")        config.p.nSpine = std::stoi(val);

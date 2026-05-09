@@ -107,6 +107,10 @@ int main(int argc, char* argv[])
   std::string& summaryCsv = config.summaryCsv;
   std::string& sensitivityCsv = config.sensitivityCsv;
   std::string& runTag = config.runTag;
+  bool& exportVelocity = config.exportVelocity;
+  bool& exportVorticity = config.exportVorticity;
+  bool& exportDiagnostics = config.exportDiagnostics;
+  bool& exportBody = config.exportBody;
 
   if (legacyKappaInputUsed) {
     clout << "Deprecated: --kappa mapped to --alphaIBM (kappa="
@@ -213,10 +217,12 @@ int main(int argc, char* argv[])
   const std::string velDir  = runVtkDir + "velocity/";
   const std::string vortDir = runVtkDir + "vorticity/";
   const std::string diagDir = runVtkDir + "diagnostics/";
-  if (!eelEnsureDirectoryTree(bodyOutDir) ||
-      !eelEnsureDirectoryTree(velDir) ||
-      !eelEnsureDirectoryTree(vortDir) ||
-      !eelEnsureDirectoryTree(diagDir)) {
+  if (!eelEnsureDirectoryTree(runOutDir) ||
+      (exportBody && !eelEnsureDirectoryTree(bodyOutDir)) ||
+      (exportVelocity && !eelEnsureDirectoryTree(velDir)) ||
+      (exportVorticity && !eelEnsureDirectoryTree(vortDir)) ||
+      (exportDiagnostics && runMode == RunMode::Full &&
+       !eelEnsureDirectoryTree(diagDir))) {
     clout << "ERROR: could not create per-run output directories under "
           << runOutDir << std::endl;
     return 1;
@@ -285,6 +291,11 @@ int main(int argc, char* argv[])
         << "  mode=" << (runMode == RunMode::Preview ? "preview" :
                          runMode == RunMode::Standard ? "standard" : "full")
         << "  exportInterval=" << exportInterval << std::endl;
+  clout << "Exports: velocity=" << (exportVelocity ? 1 : 0)
+        << "  vorticity=" << (exportVorticity ? 1 : 0)
+        << "  diagnostics=" << (exportDiagnostics ? 1 : 0)
+        << " (full mode only)"
+        << "  body=" << (exportBody ? 1 : 0) << std::endl;
   if (verificationMode) {
     clout << "Verification mode keeps the same solver physics/update order and "
           << "suppresses VTK/body exports to make parameter sweeps lighter."
@@ -1190,9 +1201,13 @@ int main(int argc, char* argv[])
 
     // Export gating: respect exportInterval and run mode
     const bool doExport = writeSpatialExports && (frame % exportInterval == 0);
-    const bool doDiagnostics = doExport && (runMode == RunMode::Full);
+    const bool doDiagnostics =
+      doExport && exportDiagnostics && (runMode == RunMode::Full);
+    const bool doFieldExport =
+      doExport && (exportVelocity || exportVorticity || doDiagnostics);
+    const bool doBodyExport = doExport && exportBody;
 
-    if (doExport) {
+    if (doFieldExport || doBodyExport) {
       LagrangianMarkers frameMarkers;
       if (!buildMarkersChecked(kinematicTimeAt(tFrame), frameMarkers, "export")) {
         return 1;
@@ -1207,20 +1222,28 @@ int main(int argc, char* argv[])
                 alphaIBM, ibmIterations, resetEulerForce, ibmRes);
       }
 
-      // Compute body mask once, share across all VTI writers
-      auto bodyMask = computeBodyMask(frameMarkers, nx, ny);
-      exportFields.sample(sLattice, bodyMask, doDiagnostics);
+      if (doFieldExport) {
+        // Compute body mask once, share across all VTI writers.
+        auto bodyMask = computeBodyMask(frameMarkers, nx, ny);
+        exportFields.sample(sLattice, bodyMask, doDiagnostics);
 
-      writeVelocityVTI(velDir, frame, vtiWriter, exportFields);
-      writeVorticityVTI(vortDir, frame, vtiWriter, exportFields);
-      if (doDiagnostics) {
-        writeDiagnosticsVTI(diagDir, frame, vtiWriter, exportFields);
+        if (exportVelocity) {
+          writeVelocityVTI(velDir, frame, vtiWriter, exportFields);
+        }
+        if (exportVorticity) {
+          writeVorticityVTI(vortDir, frame, vtiWriter, exportFields);
+        }
+        if (doDiagnostics) {
+          writeDiagnosticsVTI(diagDir, frame, vtiWriter, exportFields);
+        }
       }
 
       if (doDiagnostics) resetEulerForce();
 
-      writeBodySnapshotCSV(bodyOutDir, frame, frameMarkers);
-      writeBodyVTP(bodyOutDir, frame, p, frameMarkers);
+      if (doBodyExport) {
+        writeBodySnapshotCSV(bodyOutDir, frame, frameMarkers);
+        writeBodyVTP(bodyOutDir, frame, p, frameMarkers);
+      }
     }
   }
 
@@ -1228,16 +1251,30 @@ int main(int argc, char* argv[])
   //  Save ParaView .pvd time-series files (one per field group)
   // ============================================================
   if (writeSpatialExports) {
-    std::string pvdPath = writePVD(runOutDir, "eel3dof_velocity.pvd", "vtkData/velocity/", "eel3dof_velocity_", ".vti", nFrames, exportInterval, p.dtAnim);
-    clout << "Saved PVD: " << pvdPath << std::endl;
-    pvdPath = writePVD(runOutDir, "eel3dof_vorticity.pvd", "vtkData/vorticity/", "eel3dof_vorticity_", ".vti", nFrames, exportInterval, p.dtAnim);
-    clout << "Saved PVD: " << pvdPath << std::endl;
-    if (runMode == RunMode::Full) {
-      pvdPath = writePVD(runOutDir, "eel3dof_diagnostics.pvd", "vtkData/diagnostics/", "eel3dof_diagnostics_", ".vti", nFrames, exportInterval, p.dtAnim);
+    bool wrotePvd = false;
+    if (exportVelocity) {
+      std::string pvdPath = writePVD(runOutDir, "eel3dof_velocity.pvd", "vtkData/velocity/", "eel3dof_velocity_", ".vti", nFrames, exportInterval, p.dtAnim);
       clout << "Saved PVD: " << pvdPath << std::endl;
+      wrotePvd = true;
     }
-    pvdPath = writePVD(runOutDir, "eel3dof_body.pvd", "bodyData/", "eel3dof_body_", ".vtp", nFrames, exportInterval, p.dtAnim);
-    clout << "Saved PVD: " << pvdPath << std::endl;
+    if (exportVorticity) {
+      std::string pvdPath = writePVD(runOutDir, "eel3dof_vorticity.pvd", "vtkData/vorticity/", "eel3dof_vorticity_", ".vti", nFrames, exportInterval, p.dtAnim);
+      clout << "Saved PVD: " << pvdPath << std::endl;
+      wrotePvd = true;
+    }
+    if (runMode == RunMode::Full && exportDiagnostics) {
+      std::string pvdPath = writePVD(runOutDir, "eel3dof_diagnostics.pvd", "vtkData/diagnostics/", "eel3dof_diagnostics_", ".vti", nFrames, exportInterval, p.dtAnim);
+      clout << "Saved PVD: " << pvdPath << std::endl;
+      wrotePvd = true;
+    }
+    if (exportBody) {
+      std::string pvdPath = writePVD(runOutDir, "eel3dof_body.pvd", "bodyData/", "eel3dof_body_", ".vtp", nFrames, exportInterval, p.dtAnim);
+      clout << "Saved PVD: " << pvdPath << std::endl;
+      wrotePvd = true;
+    }
+    if (!wrotePvd) {
+      clout << "Spatial exports disabled by export flags." << std::endl;
+    }
   } else {
     clout << "Verification mode: skipped VTK/body snapshot exports." << std::endl;
   }
