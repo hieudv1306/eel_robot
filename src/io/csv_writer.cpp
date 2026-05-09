@@ -48,20 +48,24 @@ CsvWriteResult appendArSummaryCsv(const std::string& requestedPath,
     "transportEfficiencyProxy,nSteadyCycles,cycleMeanUstar,cycleCvUstar,"
     "cycleMeanCoT,cycleCvCoT,cycleMeanHydroCost,cycleCvHydroCost,"
     "cycleMeanNormalizedSlip,cycleCvNormalizedSlip,cycleConverged,"
-    "warmupMode,gaitNormalization,initialPlacementClamped,"
+    "warmupMode,gaitNormalization,waveDirection,initialPlacementClamped,"
     "initialPlacementClampCount,runtimeDomainClampHit,"
     "runtimeDomainClampCount,effectiveEelFreq,effectiveEelA0,"
     "alphaIBM,legacyKappaInputUsed,ibmIterations,meanResidualSlip,"
     "maxResidualSlip,meanConstraintPower,meanRigidBodyPower,"
     "meanDeformationPower,meanAbsConstraintPower,meanAbsRigidBodyPower,"
     "meanAbsDeformationPower,transportEfficiencyDef,cotDef,wallBoundary,"
-    "geometryKinematics,bodyKinematics,bodyMaterial,rhoBodyRatio,youngModulusPa,"
+    "geometryKinematics,bodyKinematics,softBackboneDynamics,"
+    "softBackboneRelaxationTime,softBackboneFluidTorqueScale,"
+    "softBackboneMaxAngleStep,meanSoftFluidTorqueNm,"
+    "maxSoftFluidTorqueNm,meanSoftAngleStep,maxSoftAngleStep,"
+    "bodyMaterial,rhoBodyRatio,youngModulusPa,"
     "poissonRatio,shearModulusPa,bulkModulusPa,physicalBodyLengthM,"
     "rodWidthM,rodThicknessM,rodBendingStiffnessNm2,rodAxialStiffnessN,"
     "ibmCoupling";
 
   CsvWriteResult result;
-  result.resolution = resolveCsvPath(requestedPath, summaryHeader, "_metrics_v11");
+  result.resolution = resolveCsvPath(requestedPath, summaryHeader, "_metrics_v13");
 
   std::ifstream probe(result.resolution.path);
   const bool writeHeader = !probe.good() || probe.peek() == std::ifstream::traits_type::eof();
@@ -120,6 +124,7 @@ CsvWriteResult appendArSummaryCsv(const std::string& requestedPath,
       << (in.cycleConv.cycleConverged ? 1 : 0) << ","
       << warmupModeName(in.warmupMode) << ","
       << gaitNormalizationName(in.gaitNormalization) << ","
+      << waveDirectionName(in.p.waveDirection) << ","
       << (in.initialPlacementClamped ? 1 : 0) << ","
       << in.initialPlacementClampCount << ","
       << (in.runtimeDomainClampHit ? 1 : 0) << ","
@@ -142,6 +147,14 @@ CsvWriteResult appendArSummaryCsv(const std::string& requestedPath,
       << wallBoundaryName(in.wallBoundary) << ","
       << geometryKinematicsName(in.p.geometryKinematics) << ","
       << bodyKinematicsName(in.bodyKinematics) << ","
+      << (in.softBackboneDynamics ? 1 : 0) << ","
+      << in.softBackboneRelaxationTime << ","
+      << in.softBackboneFluidTorqueScale << ","
+      << in.softBackboneMaxAngleStep << ","
+      << in.meanSoftFluidTorqueNm << ","
+      << in.maxSoftFluidTorqueNm << ","
+      << in.meanSoftAngleStep << ","
+      << in.maxSoftAngleStep << ","
       << material.name << ","
       << material.densityRatio << ","
       << material.youngModulusPa << ","
@@ -176,19 +189,23 @@ CsvWriteResult appendVerificationSummaryCsv(const std::string& requestedPath,
     "transportEfficiencyProxy,nSteadyCycles,cycleMeanUstar,cycleCvUstar,"
     "cycleMeanCoT,cycleCvCoT,cycleMeanHydroCost,cycleCvHydroCost,"
     "cycleMeanNormalizedSlip,cycleCvNormalizedSlip,cycleConverged,"
-    "warmupMode,gaitNormalization,initialPlacementClamped,"
+    "warmupMode,gaitNormalization,waveDirection,initialPlacementClamped,"
     "initialPlacementClampCount,effectiveEelFreq,effectiveEelA0,"
     "alphaIBM,legacyKappaInputUsed,ibmIterations,meanResidualSlip,"
     "maxResidualSlip,meanConstraintPower,meanRigidBodyPower,"
     "meanDeformationPower,meanAbsConstraintPower,meanAbsRigidBodyPower,"
     "meanAbsDeformationPower,transportEfficiencyDef,cotDef,wallBoundary,"
-    "geometryKinematics,bodyKinematics,bodyMaterial,rhoBodyRatio,youngModulusPa,"
+    "geometryKinematics,bodyKinematics,softBackboneDynamics,"
+    "softBackboneRelaxationTime,softBackboneFluidTorqueScale,"
+    "softBackboneMaxAngleStep,meanSoftFluidTorqueNm,"
+    "maxSoftFluidTorqueNm,meanSoftAngleStep,maxSoftAngleStep,"
+    "bodyMaterial,rhoBodyRatio,youngModulusPa,"
     "poissonRatio,shearModulusPa,bulkModulusPa,physicalBodyLengthM,"
     "rodWidthM,rodThicknessM,rodBendingStiffnessNm2,rodAxialStiffnessN,"
     "ibmCoupling";
 
   CsvWriteResult result;
-  result.resolution = resolveCsvPath(requestedPath, verificationHeader, "_metrics_v11");
+  result.resolution = resolveCsvPath(requestedPath, verificationHeader, "_metrics_v13");
 
   std::ifstream probe(result.resolution.path);
   const bool writeHeader = !probe.good() || probe.peek() == std::ifstream::traits_type::eof();
@@ -267,6 +284,7 @@ CsvWriteResult appendVerificationSummaryCsv(const std::string& requestedPath,
       << (in.cycleConv.cycleConverged ? 1 : 0) << ","
       << warmupModeName(in.warmupMode) << ","
       << gaitNormalizationName(in.gaitNormalization) << ","
+      << waveDirectionName(in.p.waveDirection) << ","
       << (in.initialPlacementClamped ? 1 : 0) << ","
       << in.initialPlacementClampCount << ","
       << in.effectiveEelFreq << ","
@@ -287,6 +305,14 @@ CsvWriteResult appendVerificationSummaryCsv(const std::string& requestedPath,
       << wallBoundaryName(in.wallBoundary) << ","
       << geometryKinematicsName(in.p.geometryKinematics) << ","
       << bodyKinematicsName(in.bodyKinematics) << ","
+      << (in.softBackboneDynamics ? 1 : 0) << ","
+      << in.softBackboneRelaxationTime << ","
+      << in.softBackboneFluidTorqueScale << ","
+      << in.softBackboneMaxAngleStep << ","
+      << in.meanSoftFluidTorqueNm << ","
+      << in.maxSoftFluidTorqueNm << ","
+      << in.meanSoftAngleStep << ","
+      << in.maxSoftAngleStep << ","
       << material.name << ","
       << material.densityRatio << ","
       << material.youngModulusPa << ","
@@ -310,8 +336,13 @@ std::string writeHistoryCsv(const std::string& runOutDir, const HistoryCsvData& 
       << "Uswim,Ulateral,forwardNetForce,Flat,Re,St,Mach,Ustar,"
       << "meanSlip,maxSlip,meanMarkerForce,maxMarkerForce,normalizedSlip,"
       << "constraintPower,rigidBodyPower,deformationPower,"
-      << "meanResidualSlip,maxResidualSlip\n";
+      << "meanResidualSlip,maxResidualSlip,"
+      << "meanSoftFluidTorqueNm,maxSoftFluidTorqueNm,"
+      << "meanSoftAngleStep,maxSoftAngleStep\n";
   csv << std::setprecision(17);
+  auto atOrZero = [](const std::vector<T>* values, size_t i) -> T {
+    return (values != nullptr && i < values->size()) ? (*values)[i] : T(0);
+  };
   for (size_t i = 0; i < h.histT->size(); ++i) {
     csv << (*h.histT)[i] << ","
         << (*h.histVx)[i] << "," << (*h.histVy)[i] << "," << (*h.histWz)[i] << ","
@@ -327,7 +358,11 @@ std::string writeHistoryCsv(const std::string& runOutDir, const HistoryCsvData& 
         << (*h.histNormalizedSlip)[i] << ","
         << (*h.histPower)[i] << ","
         << (*h.histPowerRigid)[i] << "," << (*h.histPowerDef)[i] << ","
-        << (*h.histMeanResidualSlip)[i] << "," << (*h.histMaxResidualSlip)[i] << "\n";
+        << (*h.histMeanResidualSlip)[i] << "," << (*h.histMaxResidualSlip)[i] << ","
+        << atOrZero(h.histMeanSoftFluidTorqueNm, i) << ","
+        << atOrZero(h.histMaxSoftFluidTorqueNm, i) << ","
+        << atOrZero(h.histMeanSoftAngleStep, i) << ","
+        << atOrZero(h.histMaxSoftAngleStep, i) << "\n";
   }
   csv.close();
   return fname;

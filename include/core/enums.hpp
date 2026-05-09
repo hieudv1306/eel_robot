@@ -99,6 +99,27 @@ inline const char* geometryKinematicsName(GeometryKinematics g) {
        ? "inextensible_wave" : "height_wave";
 }
 
+// Direction of the travelling actuation wave along the spine parameter s.
+// The spine uses s=0 at the head and s=L at the tail.
+enum class WaveDirection { HeadToTail, TailToHead };
+
+inline WaveDirection parseWaveDirection(const std::string& s) {
+  if (s == "tail_to_head" || s == "tailToHead" ||
+      s == "tail-head" || s == "reverse" || s == "-1") {
+    return WaveDirection::TailToHead;
+  }
+  return WaveDirection::HeadToTail;
+}
+
+inline const char* waveDirectionName(WaveDirection d) {
+  return (d == WaveDirection::TailToHead)
+       ? "tail_to_head" : "head_to_tail";
+}
+
+inline double waveDirectionSign(WaveDirection d) {
+  return (d == WaveDirection::TailToHead) ? -1.0 : 1.0;
+}
+
 // Marker/body deformation source.
 // PrescribedWave keeps the legacy direct gait-to-marker path.
 // SoftBackbone builds markers from a soft-backbone state that follows the

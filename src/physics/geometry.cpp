@@ -27,6 +27,7 @@ void buildCapsulePositionFrame(
   const T A0     = p.eelA0;
   const T r      = p.bodyRadius;
   const T pi2    = 2.0 * M_PI;
+  const T waveSign = static_cast<T>(waveDirectionSign(p.waveDirection));
 
   // Spine parameter: s=0 at the head, s=L at the tail.
   std::vector<T> s(nSp);
@@ -47,8 +48,9 @@ void buildCapsulePositionFrame(
   std::vector<T> txV(nSp), tyV(nSp), nxN(nSp), nyN(nSp);
 
   for (int i = 0; i < nSp; ++i) {
-    // s/lambda - f t sends the body wave from head to tail (increasing s).
-    phase[i] = pi2 * (s[i] / lam - freq * tActive);
+    // waveSign=+1 sends the body wave from head to tail (increasing s);
+    // waveSign=-1 reverses the travelling wave without changing forward axis.
+    phase[i] = pi2 * (waveSign * s[i] / lam - freq * tActive);
     Abase[i] = amplitudeEnvelope(s[i], L, A0);
     Aval[i]  = Abase[i] * ampScale;
   }
@@ -70,7 +72,7 @@ void buildCapsulePositionFrame(
   for (int i = 0; i < nSp; ++i) {
     const T dAds = amplitudeDerivative(i);
     slope[i] =
-      Aval[i] * std::cos(phase[i]) * (pi2 / lam)
+      Aval[i] * std::cos(phase[i]) * (waveSign * pi2 / lam)
       + dAds * std::sin(phase[i]);
   }
 

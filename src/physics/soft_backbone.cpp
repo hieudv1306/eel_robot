@@ -28,7 +28,9 @@ WaveSample samplePreferredWave(const EelParams& p, T fraction, T t,
   const T lambda = std::max(p.eelLambda, T(1e-12));
   const auto act = actuationProfile(t, p.restTime, p.rampTime);
   const T ampScale = act.ampScale * externalAmpScale;
-  const T phase = T(2) * M_PI * (s / lambda - p.eelFreq * act.tActive);
+  const T waveSign = static_cast<T>(waveDirectionSign(p.waveDirection));
+  const T phase =
+    T(2) * M_PI * (waveSign * s / lambda - p.eelFreq * act.tActive);
   const T env = amplitudeEnvelope(s, L, p.eelA0) * ampScale;
   const T dEnvDs = p.eelA0 * T(6.6) * std::pow(s / L, T(2)) / L
                  * ampScale;
@@ -36,7 +38,7 @@ WaveSample samplePreferredWave(const EelParams& p, T fraction, T t,
   WaveSample out;
   out.yNorm = env * std::sin(phase);
   out.slope = dEnvDs * std::sin(phase)
-            + env * std::cos(phase) * (T(2) * M_PI / lambda);
+            + env * std::cos(phase) * (waveSign * T(2) * M_PI / lambda);
   return out;
 }
 
@@ -304,4 +306,147 @@ SoftBackboneTorqueResult computeSoftBackboneTorques(
       std::max(out.maxAbsSegmentTorqueNm, std::abs(torque));
   }
   return out;
+}
+
+SoftBackboneCenterline buildSoftBackboneCenterlineLU(
+    const EelParams& p,
+    const SoftBackboneConfig& config,
+    const SoftBackboneState& state,
+    T xCm,
+    T yCm,
+    T theta)
+{
+  SoftBackboneCenterline out;
+  if (!config.valid || config.nSegments <= 0 ||
+      static_cast<int>(state.theta.size()) != config.nSegments ||
+      !(config.centerlineLengthM > T(0))) {
+    return out;
+  }
+
+  const T scaleToLU = p.centerlineLengthLU() / config.centerlineLengthM;
+  const T dsLu = config.dsM * scaleToLU;
+  if (!(dsLu > T(0))) {
+    return out;
+  }
+
+  const int nSegments = config.nSegments;
+  const int nNodes = nSegments + 1;
+  std::vector<T> localX(nNodes, T(0));
+  std::vector<T> localY(nNodes, T(0));
+  for (int i = 0; i < nSegments; ++i) {
+    localX[i + 1] = localX[i] + dsLu * std::cos(state.theta[i]);
+    localY[i + 1] = localY[i] + dsLu * std::sin(state.theta[i]);
+  }
+
+  const T midSeg = T(0.5) * T(nSegments);
+  const int iMid0 = static_cast<int>(std::floor(midSeg));
+  const int iMid1 = std::min(iMid0 + 1, nNodes - 1);
+  const T midFrac = midSeg - T(iMid0);
+  const T xMid = localX[iMid0] * (T(1) - midFrac) + localX[iMid1] * midFrac;
+  const T yMid = localY[iMid0] * (T(1) - midFrac) + localY[iMid1] * midFrac;
+
+  const T cosT = std::cos(theta);
+  const T sinT = std::sin(theta);
+  out.nodeX.resize(nNodes);
+  out.nodeY.resize(nNodes);
+  for (int i = 0; i < nNodes; ++i) {
+    const T xLocal = localX[i] - xMid;
+    const T yLocal = localY[i] - yMid;
+    out.nodeX[i] = cosT * xLocal - sinT * yLocal + xCm;
+    out.nodeY[i] = sinT * xLocal + cosT * yLocal + yCm;
+  }
+
+  out.segmentX.resize(nSegments);
+  out.segmentY.resize(nSegments);
+  out.segmentTheta.resize(nSegments);
+  for (int i = 0; i < nSegments; ++i) {
+    out.segmentX[i] = T(0.5) * (out.nodeX[i] + out.nodeX[i + 1]);
+    out.segmentY[i] = T(0.5) * (out.nodeY[i] + out.nodeY[i + 1]);
+    out.segmentTheta[i] = state.theta[i] + theta;
+  }
+  return out;
+}
+
+SoftBackboneState extrapolateBackboneState(
+    const SoftBackboneState& state,
+    T dt)
+{
+  SoftBackboneState out = state;
+  if (out.theta.size() != out.omega.size()) {
+    return out;
+  }
+  for (size_t i = 0; i < out.theta.size(); ++i) {
+    out.theta[i] = wrapAngle(out.theta[i] + out.omega[i] * dt);
+  }
+  return out;
+}
+
+SoftBackboneDynamicsDiagnostics advanceSoftBackboneOverdamped(
+    const SoftBackboneConfig& config,
+    const SoftBackboneState& preferred,
+    const std::vector<T>& fluidSegmentTorqueNm,
+    T dt,
+    const SoftBackboneDynamicsParams& params,
+    SoftBackboneState& state)
+{
+  SoftBackboneDynamicsDiagnostics diag;
+  const int nSegments = config.nSegments;
+  if (!config.valid || nSegments < 2 || !(dt > T(0)) ||
+      static_cast<int>(state.theta.size()) != nSegments ||
+      static_cast<int>(state.omega.size()) != nSegments ||
+      static_cast<int>(preferred.theta.size()) != nSegments ||
+      static_cast<int>(preferred.omega.size()) != nSegments ||
+      static_cast<int>(fluidSegmentTorqueNm.size()) != nSegments ||
+      !(config.jointAngleStiffnessNm > T(0))) {
+    return diag;
+  }
+
+  const T relax = std::max(params.relaxationTime, dt);
+  const T blend = std::clamp(dt / relax, T(0), T(1));
+  const T maxStep = (params.maxAngleStep > T(0))
+                  ? params.maxAngleStep : T(1e30);
+
+  std::vector<T> targetJointAngle(nSegments - 1, T(0));
+  for (int j = 0; j < nSegments - 1; ++j) {
+    const T qPreferred = wrapAngle(preferred.theta[j + 1] -
+                                   preferred.theta[j]);
+    const T fluidGeneralizedTorque =
+      params.fluidTorqueScale *
+      (fluidSegmentTorqueNm[j + 1] - fluidSegmentTorqueNm[j]);
+    diag.maxAbsFluidSegmentTorqueNm =
+      std::max(diag.maxAbsFluidSegmentTorqueNm,
+               std::max(std::abs(fluidSegmentTorqueNm[j]),
+                        std::abs(fluidSegmentTorqueNm[j + 1])));
+    const T curvatureOffset =
+      fluidGeneralizedTorque / config.bendingStiffnessNm2;
+    diag.maxAbsTargetCurvatureOffset =
+      std::max(diag.maxAbsTargetCurvatureOffset,
+               std::abs(curvatureOffset));
+    targetJointAngle[j] =
+      qPreferred + curvatureOffset * config.dsM;
+  }
+
+  std::vector<T> targetTheta(nSegments, T(0));
+  targetTheta[0] = preferred.theta[0];
+  for (int i = 1; i < nSegments; ++i) {
+    targetTheta[i] = targetTheta[i - 1] + targetJointAngle[i - 1];
+  }
+
+  T meanError = T(0);
+  for (int i = 0; i < nSegments; ++i) {
+    meanError += wrapAngle(targetTheta[i] - preferred.theta[i]);
+  }
+  meanError /= T(nSegments);
+  for (int i = 0; i < nSegments; ++i) {
+    targetTheta[i] = wrapAngle(targetTheta[i] - meanError);
+  }
+
+  for (int i = 0; i < nSegments; ++i) {
+    T step = blend * wrapAngle(targetTheta[i] - state.theta[i]);
+    step = std::clamp(step, -maxStep, maxStep);
+    state.omega[i] = step / dt;
+    state.theta[i] = wrapAngle(state.theta[i] + step);
+    diag.maxAbsAngleStep = std::max(diag.maxAbsAngleStep, std::abs(step));
+  }
+  return diag;
 }

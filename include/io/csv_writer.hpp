@@ -47,6 +47,14 @@ struct SummaryCsvInputs {
   T alphaIBM = 0;
   bool legacyKappaInputUsed = false;
   int ibmIterations = 1;
+  bool softBackboneDynamics = false;
+  T softBackboneRelaxationTime = 0;
+  T softBackboneFluidTorqueScale = 0;
+  T softBackboneMaxAngleStep = 0;
+  T meanSoftFluidTorqueNm = 0;
+  T maxSoftFluidTorqueNm = 0;
+  T meanSoftAngleStep = 0;
+  T maxSoftAngleStep = 0;
 };
 
 struct VerificationCsvInputs {
@@ -81,6 +89,14 @@ struct VerificationCsvInputs {
   T alphaIBM = 0;
   bool legacyKappaInputUsed = false;
   int ibmIterations = 1;
+  bool softBackboneDynamics = false;
+  T softBackboneRelaxationTime = 0;
+  T softBackboneFluidTorqueScale = 0;
+  T softBackboneMaxAngleStep = 0;
+  T meanSoftFluidTorqueNm = 0;
+  T maxSoftFluidTorqueNm = 0;
+  T meanSoftAngleStep = 0;
+  T maxSoftAngleStep = 0;
 };
 
 struct HistoryCsvData {
@@ -113,6 +129,10 @@ struct HistoryCsvData {
   const std::vector<T>* histPowerDef = nullptr;
   const std::vector<T>* histMeanResidualSlip = nullptr;
   const std::vector<T>* histMaxResidualSlip = nullptr;
+  const std::vector<T>* histMeanSoftFluidTorqueNm = nullptr;
+  const std::vector<T>* histMaxSoftFluidTorqueNm = nullptr;
+  const std::vector<T>* histMeanSoftAngleStep = nullptr;
+  const std::vector<T>* histMaxSoftAngleStep = nullptr;
 };
 
 CsvPathResolution resolveCsvPath(const std::string& requestedPath,

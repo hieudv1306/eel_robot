@@ -1,5 +1,6 @@
 #include "core/params.hpp"
 #include "physics/geometry.hpp"
+#include "physics/markers.hpp"
 #include "physics/material.hpp"
 #include "physics/soft_rod.hpp"
 
@@ -94,6 +95,19 @@ int main() {
   const SoftBackboneState preferred =
     preferredBackboneStateWave(pInext, backbone, 2.0, dt);
 
+  EelParams pReverse = pInext;
+  pReverse.waveDirection = WaveDirection::TailToHead;
+  const SoftBackboneState reversed =
+    preferredBackboneStateWave(pReverse, backbone, 2.0, dt);
+  assert(reversed.theta.size() == preferred.theta.size());
+  T maxWaveDirectionThetaDiff = 0.0;
+  for (size_t i = 0; i < preferred.theta.size(); ++i) {
+    maxWaveDirectionThetaDiff =
+      std::max(maxWaveDirectionThetaDiff,
+               std::abs(preferred.theta[i] - reversed.theta[i]));
+  }
+  assert(maxWaveDirectionThetaDiff > 1e-8);
+
   std::vector<T> xb, yb, dsb;
   buildCapsuleGeometryFromBackboneState(
     pInext, backbone, preferred, 100.0, 60.0, 0.0, xb, yb, dsb);
@@ -117,4 +131,26 @@ int main() {
                                                     uyB[i] * uyB[i]));
   }
   assert(maxSoftSpeed > 1e-8);
+
+  LagrangianMarkers markers;
+  buildLagrangianMarkersFromSoftBackboneState(
+    pInext, backbone, preferred, 0.0, 0.0, 0.0,
+    100.0, 60.0, 0.0, dt, markers);
+  assert(markers.size() > 0);
+  for (int i = 0; i < markers.size(); ++i) {
+    markers.fx[i] = 0.0;
+    markers.fy[i] = 0.0;
+  }
+  auto noLoad = projectMarkerForcesToSoftBackbone(
+    pInext, backbone, preferred, 100.0, 60.0, 0.0, markers);
+  assert(noLoad.segmentTorqueNm.size() == static_cast<size_t>(backbone.nSegments));
+  assert(noLoad.maxAbsSegmentTorqueNm == 0.0);
+
+  markers.fx[0] = 1.0;
+  markers.fy[0] = -0.5;
+  auto loaded = projectMarkerForcesToSoftBackbone(
+    pInext, backbone, preferred, 100.0, 60.0, 0.0, markers);
+  assert(loaded.segmentTorqueNm.size() == static_cast<size_t>(backbone.nSegments));
+  assert(loaded.latticeTorqueToNm > 0.0);
+  assert(loaded.maxAbsSegmentTorqueNm > 0.0);
 }

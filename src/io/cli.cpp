@@ -38,6 +38,9 @@ RunConfig parseCommandLine(int argc, char* argv[], const std::string& baseLogDir
     if (key == "--eelFreq")       config.p.eelFreq = std::stod(val);
     if (key == "--eelLambda")     config.p.eelLambda = std::stod(val);
     if (key == "--eelA0")         config.p.eelA0 = std::stod(val);
+    if (key == "--waveDirection" || key == "--gaitDirection") {
+      config.p.waveDirection = parseWaveDirection(val);
+    }
     if (key == "--aspectRatio")  { config.p.aspectRatio = std::stod(val); config.aspectGeometryOverride = true; }
     if (key == "--bodyAreaTarget") {
       config.p.bodyAreaTarget = std::stod(val);
@@ -85,6 +88,18 @@ RunConfig parseCommandLine(int argc, char* argv[], const std::string& baseLogDir
       config.bodyKinematics = parseBool(val)
                             ? BodyKinematics::SoftBackbone
                             : BodyKinematics::PrescribedWave;
+    }
+    if (key == "--softBackboneDynamics") {
+      config.softBackboneDynamics = parseBool(val);
+    }
+    if (key == "--softBackboneRelaxationTime") {
+      config.softBackboneRelaxationTime = std::stod(val);
+    }
+    if (key == "--softBackboneFluidTorqueScale") {
+      config.softBackboneFluidTorqueScale = std::stod(val);
+    }
+    if (key == "--softBackboneMaxAngleStep") {
+      config.softBackboneMaxAngleStep = std::stod(val);
     }
     if (key == "--wallBoundary")  config.wallBoundary = parseWallBoundary(val);
     if (key == "--tailAmpRatioTarget") config.tailAmpRatioTarget = std::stod(val);

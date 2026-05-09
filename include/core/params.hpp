@@ -23,6 +23,7 @@ struct EelParams {
   T      eelLambda    = 1.0;
   T      eelA0        = 0.07;
   GeometryKinematics geometryKinematics = GeometryKinematics::HeightWave;
+  WaveDirection waveDirection = WaveDirection::HeadToTail;
   T      restTime     = 0.2;
   T      rampTime     = 1.6;
 

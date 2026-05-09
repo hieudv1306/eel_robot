@@ -44,6 +44,26 @@ struct SoftBackboneTorqueResult {
   T maxAbsSegmentTorqueNm = 0.0;
 };
 
+struct SoftBackboneCenterline {
+  std::vector<T> nodeX;
+  std::vector<T> nodeY;
+  std::vector<T> segmentX;
+  std::vector<T> segmentY;
+  std::vector<T> segmentTheta;
+};
+
+struct SoftBackboneDynamicsParams {
+  T relaxationTime = 0.05;
+  T fluidTorqueScale = 1.0;
+  T maxAngleStep = 0.02;
+};
+
+struct SoftBackboneDynamicsDiagnostics {
+  T maxAbsFluidSegmentTorqueNm = 0.0;
+  T maxAbsTargetCurvatureOffset = 0.0;
+  T maxAbsAngleStep = 0.0;
+};
+
 SoftBackboneConfig makeSoftBackboneConfig(
     const EelParams& p,
     const PlanarRodSectionEstimate& rodSection,
@@ -73,3 +93,23 @@ SoftBackboneTorqueResult computeSoftBackboneTorques(
     const SoftBackboneConfig& config,
     const SoftBackboneState& state,
     const SoftBackboneCurvatureProfile& preferred);
+
+SoftBackboneCenterline buildSoftBackboneCenterlineLU(
+    const EelParams& p,
+    const SoftBackboneConfig& config,
+    const SoftBackboneState& state,
+    T xCm,
+    T yCm,
+    T theta);
+
+SoftBackboneState extrapolateBackboneState(
+    const SoftBackboneState& state,
+    T dt);
+
+SoftBackboneDynamicsDiagnostics advanceSoftBackboneOverdamped(
+    const SoftBackboneConfig& config,
+    const SoftBackboneState& preferred,
+    const std::vector<T>& fluidSegmentTorqueNm,
+    T dt,
+    const SoftBackboneDynamicsParams& params,
+    SoftBackboneState& state);

@@ -16,6 +16,15 @@ struct LagrangianMarkers {
   void resize(int n);
 };
 
+struct SoftBackboneForceProjection {
+  std::vector<T> segmentTorqueNm;
+  T netForceXLat = 0.0;
+  T netForceYLat = 0.0;
+  T netTorqueLat = 0.0;
+  T maxAbsSegmentTorqueNm = 0.0;
+  T latticeTorqueToNm = 0.0;
+};
+
 void buildLagrangianMarkers(
     const EelParams& p,
     T t, T Vx, T Vy, T omegaZ,
@@ -30,3 +39,19 @@ void buildLagrangianMarkersFromSoftBackbone(
     T xCm, T yCm, T theta,
     T dtLbm, T ampRamp,
     LagrangianMarkers& markers);
+
+void buildLagrangianMarkersFromSoftBackboneState(
+    const EelParams& p,
+    const SoftBackboneConfig& config,
+    const SoftBackboneState& state,
+    T Vx, T Vy, T omegaZ,
+    T xCm, T yCm, T theta,
+    T dtLbm,
+    LagrangianMarkers& markers);
+
+SoftBackboneForceProjection projectMarkerForcesToSoftBackbone(
+    const EelParams& p,
+    const SoftBackboneConfig& config,
+    const SoftBackboneState& state,
+    T xCm, T yCm, T theta,
+    const LagrangianMarkers& markers);
