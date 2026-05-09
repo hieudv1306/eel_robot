@@ -17,6 +17,13 @@ struct SoftBackboneConfig {
   T massPerLengthKgM = 0.0;
   T segmentMassKg = 0.0;
   T segmentRotationalInertiaKgM2 = 0.0;
+  // Slender-body added rotational inertia per segment, scaled by
+  // softBackboneAddedMassFrac.  Lumped into the structural inertia in
+  // the implicit integrator to suppress the partitioned-FSI added-mass
+  // instability (Causin et al. 2005) that otherwise appears when the
+  // displaced fluid mass is comparable to the body mass.
+  T addedSegmentRotationalInertiaKgM2 = 0.0;
+  T effectiveSegmentRotationalInertiaKgM2 = 0.0;
   T jointAngleStiffnessNm = 0.0;
   T jointAngleDampingNms = 0.0;
   T curvatureDampingNm2s = 0.0;
@@ -68,7 +75,8 @@ struct SoftBackboneDynamicsDiagnostics {
 SoftBackboneConfig makeSoftBackboneConfig(
     const EelParams& p,
     const PlanarRodSectionEstimate& rodSection,
-    int nSegments);
+    int nSegments,
+    T addedMassFrac = T(1));
 
 SoftBackboneState makeStraightBackboneState(int nSegments, T theta0 = 0.0);
 

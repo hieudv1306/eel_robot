@@ -111,7 +111,8 @@ SoftBackboneCurvatureProfile curvatureFromSegmentAngles(
 SoftBackboneConfig makeSoftBackboneConfig(
     const EelParams& p,
     const PlanarRodSectionEstimate& rodSection,
-    int nSegments)
+    int nSegments,
+    T addedMassFrac)
 {
   SoftBackboneConfig out;
   if (!rodSection.valid || nSegments < 2 ||
@@ -136,14 +137,42 @@ SoftBackboneConfig makeSoftBackboneConfig(
   out.segmentMassKg = out.massPerLengthKgM * out.dsM;
   out.segmentRotationalInertiaKgM2 =
     out.segmentMassKg * out.dsM * out.dsM / T(12);
+
+  // Slender-body added rotational inertia per segment.  For a 2D segment of
+  // half-width b in cross-flow rotating about its centroid, the leading-order
+  // added mass per unit length is rho_f * pi * b^2.  A rod-segment of length
+  // ds rotating about its midpoint then has I_added = rho_f * pi * b^2 * ds^3
+  // / 12, matching the slender-rod inertia formula.  Lumping this into the
+  // structural inertia is the standard mitigation for the partitioned-FSI
+  // added-mass instability that otherwise appears when the displaced fluid
+  // mass is comparable to or exceeds the body mass per length.
+  T addedI = T(0);
+  if (p.fluidDensityKgM3 > T(0) &&
+      p.totalGeometricLengthLU() > T(0) &&
+      addedMassFrac > T(0)) {
+    const T dxM = p.physicalBodyLengthM / p.totalGeometricLengthLU();
+    const T halfWidthM = (p.bodyRadius > T(0)) ? p.bodyRadius * dxM : T(0);
+    if (halfWidthM > T(0)) {
+      addedI = addedMassFrac * p.fluidDensityKgM3
+             * M_PI * halfWidthM * halfWidthM
+             * out.dsM * out.dsM * out.dsM / T(12);
+    }
+  }
+  out.addedSegmentRotationalInertiaKgM2 = addedI;
+  out.effectiveSegmentRotationalInertiaKgM2 =
+    out.segmentRotationalInertiaKgM2 + addedI;
+
   out.jointAngleStiffnessNm = out.bendingStiffnessNm2 / out.dsM;
   out.dampingRatio = rodSection.dampingRatio;
 
   if (out.dampingRatio > T(0) &&
       out.jointAngleStiffnessNm > T(0) &&
-      out.segmentRotationalInertiaKgM2 > T(0)) {
+      out.effectiveSegmentRotationalInertiaKgM2 > T(0)) {
+    // Damping coefficient targets the desired damping ratio against the
+    // *effective* (structural + added) inertia so that augmenting the mass
+    // does not silently lower zeta.
     const T effectiveRelativeInertia =
-      T(0.5) * out.segmentRotationalInertiaKgM2;
+      T(0.5) * out.effectiveSegmentRotationalInertiaKgM2;
     out.jointAngleDampingNms =
       T(2) * out.dampingRatio
       * std::sqrt(out.jointAngleStiffnessNm * effectiveRelativeInertia);
@@ -506,14 +535,14 @@ SoftBackboneDynamicsDiagnostics advanceSoftBackboneImplicit(
       static_cast<int>(preferred.omega.size()) != nSegments ||
       static_cast<int>(fluidSegmentTorqueNm.size()) != nSegments ||
       !(config.jointAngleStiffnessNm > T(0)) ||
-      !(config.segmentRotationalInertiaKgM2 > T(0))) {
+      !(config.effectiveSegmentRotationalInertiaKgM2 > T(0))) {
     return diag;
   }
 
   const int nInterior = nSegments - 1;  // segments 1..N-1
   const int nJoints = nSegments - 1;    // joints 0..N-2
 
-  const T I = config.segmentRotationalInertiaKgM2;
+  const T I = config.effectiveSegmentRotationalInertiaKgM2;
   const T K = config.jointAngleStiffnessNm;
   const T C = config.jointAngleDampingNms;
   const T A = K * dt + C;

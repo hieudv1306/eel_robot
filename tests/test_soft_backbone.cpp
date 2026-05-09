@@ -28,6 +28,20 @@ int main() {
                   rod.bendingStiffnessNm2) < 1e-14);
   assert(config.jointAngleStiffnessNm > 0.0);
   assert(config.jointAngleDampingNms > 0.0);
+  // Added mass: full theoretical fraction (default).  For Dragon Skin 20 in
+  // water with the Issue 1 validation params, the slender-body added inertia
+  // should be of comparable magnitude to the structural inertia (within an
+  // order of magnitude); a zero or negative value would indicate the
+  // partitioned-FSI added-mass mitigation has been disabled by accident.
+  assert(config.addedSegmentRotationalInertiaKgM2 > 0.0);
+  assert(config.effectiveSegmentRotationalInertiaKgM2 >
+         config.segmentRotationalInertiaKgM2);
+  // Disabling the added-mass fraction must zero out the augmentation.
+  const SoftBackboneConfig configStructOnly =
+    makeSoftBackboneConfig(p, rod, p.nSpine - 1, T(0));
+  assert(configStructOnly.addedSegmentRotationalInertiaKgM2 == 0.0);
+  assert(std::abs(configStructOnly.effectiveSegmentRotationalInertiaKgM2 -
+                  configStructOnly.segmentRotationalInertiaKgM2) < 1e-30);
 
   const SoftBackboneState straight =
     makeStraightBackboneState(config.nSegments);

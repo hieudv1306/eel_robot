@@ -107,6 +107,9 @@ RunConfig parseCommandLine(int argc, char* argv[], const std::string& baseLogDir
     if (key == "--softBackboneMaxAngleStep") {
       config.softBackboneMaxAngleStep = std::stod(val);
     }
+    if (key == "--softBackboneAddedMassFrac") {
+      config.softBackboneAddedMassFrac = std::stod(val);
+    }
     if (key == "--softBackboneAbortOnInstability") {
       config.softBackboneAbortOnInstability = parseBool(val);
     }

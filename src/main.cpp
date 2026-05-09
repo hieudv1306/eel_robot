@@ -426,7 +426,8 @@ int main(int argc, char* argv[])
   const PlanarRodSectionEstimate rodSection =
     estimatePlanarRodSection(p, material);
   const SoftBackboneConfig softBackbone =
-    makeSoftBackboneConfig(p, rodSection, std::max(2, p.nSpine - 1));
+    makeSoftBackboneConfig(p, rodSection, std::max(2, p.nSpine - 1),
+                           config.softBackboneAddedMassFrac);
   BodyInertia bodyInertia = computeBodyInertia(p, material.densityRatio);
   T bodyCenterlineLength = bodyInertia.bodyCenterlineLength;
   T bodyLength = bodyInertia.bodyLength;
@@ -518,12 +519,22 @@ int main(int argc, char* argv[])
     const SoftBackboneTorqueResult straightBackboneTorque =
       computeSoftBackboneTorques(softBackbone, straightBackbone,
                                  preferredBackbone);
+    const T addedRatio =
+      (softBackbone.segmentRotationalInertiaKgM2 > T(0))
+        ? softBackbone.addedSegmentRotationalInertiaKgM2 /
+          softBackbone.segmentRotationalInertiaKgM2
+        : T(0);
     clout << "Soft backbone foundation: segments=" << softBackbone.nSegments
           << "  centerlineL=" << softBackbone.centerlineLengthM
           << " m  ds=" << softBackbone.dsM
           << " m  Ktheta=" << softBackbone.jointAngleStiffnessNm
           << " N*m/rad  Ctheta=" << softBackbone.jointAngleDampingNms
-          << " N*m*s/rad  maxPreferredCurvature="
+          << " N*m*s/rad  Iseg=" << softBackbone.segmentRotationalInertiaKgM2
+          << " kg*m^2  IsegAdded=" << softBackbone.addedSegmentRotationalInertiaKgM2
+          << " kg*m^2  (frac="
+          << config.softBackboneAddedMassFrac
+          << ", I_added/I_struct=" << addedRatio
+          << ")  maxPreferredCurvature="
           << preferredBackbone.maxAbsCurvature
           << " 1/m  maxStraightMoment="
           << straightBackboneTorque.maxAbsJointMomentNm

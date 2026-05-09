@@ -20,6 +20,12 @@ struct RunConfig {
   T softBackboneRelaxationTime = 0.05;
   T softBackboneFluidTorqueScale = 1.0;
   T softBackboneMaxAngleStep = 0.02;
+  // Fraction of the slender-body theoretical added rotational inertia
+  // lumped into segment inertia.  Defaults to 1.0 (full theoretical added
+  // mass) which is required to keep partitioned-FSI dynamics stable when
+  // the displaced fluid mass is comparable to the body mass.  Set to 0.0
+  // to recover the structural-only inertia for diagnostic comparisons.
+  T softBackboneAddedMassFrac = 1.0;
   bool softBackboneAbortOnInstability = true;
   T softBackboneAbortMeanSlip = 0.5;
   T softBackboneAbortMaxSlip = 50.0;

@@ -42,6 +42,8 @@ python3 scripts/run_ar_sweep.py --aspect-ratio 7 9 11 \
   --waveDirection=tail_to_head \
   --softBackboneDynamics=true \
   --softBackboneFluidTorqueScale=0.1 \
+  --softBackboneAddedMassFrac=10 \
+  --softBackboneMaxAngleStep=0.5 \
   --ibmIterations=2 --tCut=4
 ```
 
@@ -111,24 +113,46 @@ integrators selected by `--softBackboneIntegrator`:
 ./11_lbm_eel_3dof --bodyKinematics=soft_backbone \
   --softBackboneDynamics=true \
   --softBackboneIntegrator=implicit \
-  --rampTime=3.0 \
-  --softBackboneRelaxationTime=0.05 \
-  --softBackboneFluidTorqueScale=0.001 \
-  --softBackboneMaxAngleStep=0.02
+  --softBackboneFluidTorqueScale=0.1 \
+  --softBackboneAddedMassFrac=10 \
+  --softBackboneMaxAngleStep=0.5
 ```
 
 The history and summary CSVs include the coupling settings plus
 `meanSoftFluidTorqueNm`, `maxSoftFluidTorqueNm`, `meanSoftAngleStep`, and
 `maxSoftAngleStep` for post-run checks.
 
-Caveat: the fluid-loaded coupling is sensitive to the torque scale.  Values as
-low as `softBackboneFluidTorqueScale=0.1` can exhibit positive-feedback growth
-between IBM slip and backbone deflection during gait ramp-up.  Start with
-log-scale probes such as `0`, `1e-4`, `1e-3`, and `1e-2`, use longer
-`--rampTime`, or smaller `dtAnim/substeps` before increasing the scale.  The
-default instability guard aborts a run before NaNs are written when slip grows
-far beyond IBM warning levels or when the soft angle-step limiter saturates for
-several consecutive frames; disable only for debugging with
+Stability and added mass: even with the implicit Newton-Euler backbone
+integrator, the partitioned coupling between LBM (advances first) and the
+backbone (lagged fluid load) is subject to the classical added-mass
+instability when the displaced fluid mass is comparable to the body mass --
+which is the case here for water + Dragon Skin 20.  The structural inertia
+alone leaves the scheme just inside the stability boundary at very low
+fluid-torque scales and will diverge as the scale grows.
+
+`--softBackboneAddedMassFrac` lumps a fraction of the slender-body theoretical
+added rotational inertia into each segment to widen the stable operating
+window.  Empirically (grid 600x180, eelScale=60, bodyRadius=4, nSpine=100,
+substeps=20), the minimum fraction needed at each torque scale is roughly:
+
+| `--softBackboneFluidTorqueScale` | min `--softBackboneAddedMassFrac` |
+|---|---|
+| 0.001 | 1 (theoretical) |
+| 0.01  | 1 |
+| 0.05  | 5 |
+| 0.1   | 10 |
+| 1.0   | 300 |
+
+A frac of 10 with scale 0.1 is the recommended starting point for AR sweeps
+that need backbone dynamics enabled but want the gait to stay close to the
+prescribed-wave reference (validated to within 0.01% on `meanResidualSlip`).
+Pushing frac high enough to stabilise scale=1 effectively freezes the
+backbone, so for genuine full-coupling FSI a strong-coupling sub-iteration is
+the proper fix; the added-mass knob is a partitioned-scheme work-around.
+
+The default instability guard aborts a run before NaNs are written when slip
+grows far beyond IBM warning levels or when the soft angle-step limiter
+saturates for several consecutive frames; disable only for debugging with
 `--softBackboneAbortOnInstability=false`.
 
 ## Layout
