@@ -5,6 +5,7 @@
 #include "core/types.hpp"
 
 #include <string>
+#include <vector>
 
 struct RunConfig {
   EelParams p;
@@ -13,15 +14,21 @@ struct RunConfig {
   SimulationCase simCase = SimulationCase::SurgeOnly;
   WarmupMode warmupMode = WarmupMode::Rest;
   WallBoundary wallBoundary = WallBoundary::NoSlip;
-  bool exportVelocity = true;
-  bool exportVorticity = true;
-  bool exportDiagnostics = true;
-  bool exportBody = true;
-  BodyKinematics bodyKinematics = BodyKinematics::PrescribedWave;
+  bool exportVelocity = false;
+  bool exportVorticity = false;
+  bool exportDiagnostics = false;
+  bool exportBody = false;
+  BodyKinematics bodyKinematics = BodyKinematics::SoftBackbone;
   bool softBackboneDynamics = false;
   T softBackboneRelaxationTime = 0.05;
   T softBackboneFluidTorqueScale = 1.0;
+  T softBackboneFluidTorqueFilterTime = 0.0;
   T softBackboneMaxAngleStep = 0.02;
+  int softBackboneCouplingIterations = 1;
+  T softBackboneCouplingRelaxation = 1.0;
+  T softBackboneCouplingTolerance = 1e-4;
+  SoftBackboneLoadProjection softBackboneLoadProjection =
+    SoftBackboneLoadProjection::SegmentCentroid;
   // Fraction of the slender-body theoretical added rotational inertia
   // lumped into segment inertia.  Defaults to 1.0 (full theoretical added
   // mass) which is required to keep partitioned-FSI dynamics stable when
@@ -34,6 +41,7 @@ struct RunConfig {
   int softBackboneAbortSaturatedFrames = 3;
   T alphaIBM = 1.0;
   int ibmIterations = 1;
+  int legacyNIbmIters = 1;
   T tCut = -1.0;
   std::string summaryCsv;
   std::string sensitivityCsv;
@@ -42,4 +50,21 @@ struct RunConfig {
   bool aspectGeometryOverride = false;
 };
 
+struct CliDiagnostics {
+  std::vector<std::string> errors;
+  std::vector<std::string> warnings;
+
+  bool ok() const { return errors.empty(); }
+};
+
+struct CliParseResult {
+  RunConfig config;
+  CliDiagnostics diagnostics;
+  bool helpRequested = false;
+};
+
+CliParseResult parseCommandLineDetailed(int argc, char* argv[],
+                                        const std::string& baseLogDir);
 RunConfig parseCommandLine(int argc, char* argv[], const std::string& baseLogDir);
+CliDiagnostics validateRunConfig(const RunConfig& config);
+std::string commandLineUsage(const char* executableName);

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <utility>
 
 
@@ -325,8 +326,8 @@ std::vector<CycleAverage> computeCycleAverages(
 
 // Compute mean and coefficient of variation of selected per-cycle quantities
 // over the last min(5, cycles.size()) cycles.  cycleConverged is true only if
-// at least 3 cycles are available AND the CoV of meanUstar, CoT, and
-// hydroCost are each below 0.05.
+// at least 3 cycles are available, signed cycle-mean Uswim is still forward,
+// and signed speed / Ustar / cost metrics are stable.
 CycleConvergence computeCycleConvergence(const std::vector<CycleAverage>& cycles)
 {
   CycleConvergence out;
@@ -357,15 +358,23 @@ CycleConvergence computeCycleConvergence(const std::vector<CycleAverage>& cycles
     }
     var /= T(count);
     const T sd = std::sqrt(var);
-    const T cv = (std::abs(mean) > T(1e-12)) ? sd / std::abs(mean) : T(0);
+    T cv = T(0);
+    if (std::abs(mean) > T(1e-12)) {
+      cv = sd / std::abs(mean);
+    } else if (sd > T(1e-12)) {
+      cv = std::numeric_limits<T>::infinity();
+    }
     return {mean, cv};
   };
 
+  auto [muUswim, cvUswim] = meanCv([](const CycleAverage& c) { return c.Uswim; });
   auto [muUstar, cvUstar] = meanCv([](const CycleAverage& c) { return c.Ustar; });
   auto [muCoT,   cvCoT]   = meanCv([](const CycleAverage& c) { return c.CoT; });
   auto [muHydro, cvHydro] = meanCv([](const CycleAverage& c) { return c.hydroCost; });
   auto [muNslip, cvNslip] = meanCv([](const CycleAverage& c) { return c.normalizedSlip; });
 
+  out.cycleMeanUswim = muUswim;
+  out.cycleCvUswim = cvUswim;
   out.cycleMeanUstar = muUstar;
   out.cycleCvUstar = cvUstar;
   out.cycleMeanCoT = muCoT;
@@ -376,9 +385,10 @@ CycleConvergence computeCycleConvergence(const std::vector<CycleAverage>& cycles
   out.cycleCvNormalizedSlip = cvNslip;
 
   out.cycleConverged = (out.nSteadyCycles >= 3 &&
+                        out.cycleMeanUswim > T(1e-12) &&
+                        out.cycleCvUswim < T(0.05) &&
                         out.cycleCvUstar < T(0.05) &&
                         out.cycleCvCoT < T(0.05) &&
                         out.cycleCvHydroCost < T(0.05));
   return out;
 }
-

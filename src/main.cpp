@@ -84,7 +84,31 @@ int main(int argc, char* argv[])
     return 1;
   }
 
-  RunConfig config = parseCommandLine(argc, argv, baseLogDir);
+  CliParseResult cli = parseCommandLineDetailed(argc, argv, baseLogDir);
+  if (cli.helpRequested && cli.diagnostics.errors.empty()) {
+    clout << commandLineUsage(argc > 0 ? argv[0] : "11_lbm_eel_3dof");
+    return 0;
+  }
+
+  CliDiagnostics configDiagnostics = validateRunConfig(cli.config);
+  cli.diagnostics.errors.insert(cli.diagnostics.errors.end(),
+                                configDiagnostics.errors.begin(),
+                                configDiagnostics.errors.end());
+  cli.diagnostics.warnings.insert(cli.diagnostics.warnings.end(),
+                                  configDiagnostics.warnings.begin(),
+                                  configDiagnostics.warnings.end());
+  for (const std::string& warning : cli.diagnostics.warnings) {
+    clout << "WARNING: " << warning << std::endl;
+  }
+  if (!cli.diagnostics.errors.empty()) {
+    for (const std::string& error : cli.diagnostics.errors) {
+      clout << "ERROR: " << error << std::endl;
+    }
+    clout << commandLineUsage(argc > 0 ? argv[0] : "11_lbm_eel_3dof");
+    return 1;
+  }
+
+  RunConfig config = cli.config;
   EelParams& p = config.p;
   RunMode& runMode = config.runMode;
   StudyMode& studyMode = config.studyMode;
@@ -92,6 +116,8 @@ int main(int argc, char* argv[])
   WarmupMode& warmupMode = config.warmupMode;
   BodyKinematics& bodyKinematics = config.bodyKinematics;
   bool& softBackboneDynamics = config.softBackboneDynamics;
+  int& softBackboneCouplingIterations =
+    config.softBackboneCouplingIterations;
   T& alphaIBM = config.alphaIBM;
   int& ibmIterations = config.ibmIterations;
   bool& rawGeometryOverride = config.rawGeometryOverride;
@@ -105,13 +131,6 @@ int main(int argc, char* argv[])
   bool& exportVorticity = config.exportVorticity;
   bool& exportDiagnostics = config.exportDiagnostics;
   bool& exportBody = config.exportBody;
-
-  if (softBackboneDynamics &&
-      bodyKinematics != BodyKinematics::SoftBackbone) {
-    clout << "ERROR: --softBackboneDynamics=true requires "
-          << "--bodyKinematics=soft_backbone." << std::endl;
-    return 1;
-  }
 
   if (rawGeometryOverride && !aspectGeometryOverride) {
     p.useAspectRatioGeometry = false;
@@ -213,13 +232,13 @@ int main(int argc, char* argv[])
         << " rho_local=1.0, dt=1.0 in lattice units;"
         << " iterations use sparse Eulerian correction re-interpolation)"
         << std::endl;
-  clout << "IBM legacy params: nIbmIters(requested)=" << p.nIbmIters
+  clout << "IBM legacy params: nIbmIters(requested)=" << config.legacyNIbmIters
         << "  spongeWidth=" << p.spongeWidth
         << "  spongeStrength=" << p.spongeStrength << std::endl;
   clout << "IBM warnings: meanSlip>" << p.warnMeanSlip
         << "  maxSlip>" << p.warnMaxSlip
         << "  maxMarkerForce>" << p.warnMarkerForce << std::endl;
-  if (p.nIbmIters != 1) {
+  if (config.legacyNIbmIters != 1) {
     clout << "NOTE: --nIbmIters is retained for input compatibility, but "
           << "the corrected coupling uses one IBM force evaluation per fluid step."
           << std::endl;
@@ -454,13 +473,23 @@ int main(int argc, char* argv[])
   if (bodyKinematics == BodyKinematics::SoftBackbone) {
     clout << "Soft backbone coupling: dynamics="
           << (softBackboneDynamics ? "enabled" : "disabled")
-          << "  integrator=implicit"
-          << "  relaxationTime=" << config.softBackboneRelaxationTime
-          << " s  fluidTorqueScale="
+          << "  integrator=implicit_mean_orientation_affine_load_filter"
+          << "  fluidTorqueScale="
           << config.softBackboneFluidTorqueScale
+          << "  fluidTorqueFilterTime="
+          << config.softBackboneFluidTorqueFilterTime
           << "  maxAngleStep="
           << config.softBackboneMaxAngleStep
-          << " rad/step";
+          << " rad/step"
+          << "  couplingIterations="
+          << softBackboneCouplingIterations
+          << "  couplingRelaxation="
+          << config.softBackboneCouplingRelaxation
+          << "  couplingTolerance="
+          << config.softBackboneCouplingTolerance
+          << "  loadProjection="
+          << softBackboneLoadProjectionName(
+               config.softBackboneLoadProjection);
     if (softBackboneDynamics) {
       clout << "  abortOnInstability="
             << (config.softBackboneAbortOnInstability ? 1 : 0)
@@ -508,10 +537,11 @@ int main(int argc, char* argv[])
   auto deformationAmpScale = []() -> T { return T(1); };
 
   SoftBackboneDynamicsParams softDynamicsParams;
-  softDynamicsParams.relaxationTime = config.softBackboneRelaxationTime;
   softDynamicsParams.fluidTorqueScale = config.softBackboneFluidTorqueScale;
   softDynamicsParams.maxAngleStep = config.softBackboneMaxAngleStep;
   SoftBackboneState softDynamicState;
+  std::vector<T> filteredSoftSegmentTorqueNm;
+  bool softTorqueFilterInitialized = false;
   if (bodyKinematics == BodyKinematics::SoftBackbone) {
     softDynamicState =
       preferredBackboneStateWave(p, softBackbone, T(0), dtLbm,
@@ -586,21 +616,32 @@ int main(int argc, char* argv[])
     return ok;
   };
 
+  auto buildMarkersFromSoftStateChecked =
+      [&](const SoftBackboneState& state, LagrangianMarkers& target,
+          const char* context) -> bool {
+    applyModeDefinitionState();
+    if (!clampBodyBeforeMarkers()) return false;
+    applyModeDefinitionState();
+    buildLagrangianMarkersFromSoftBackboneState(
+      p, softBackbone, state, Vx, Vy, omegaZ,
+      xCm, yCm, theta, dtLbm, target);
+    return markersInDomain(target, context);
+  };
+
   auto buildMarkersChecked = [&](T t, LagrangianMarkers& target,
                                  const char* context) -> bool {
+    if (bodyKinematics == BodyKinematics::SoftBackbone &&
+        softBackboneDynamics) {
+      return buildMarkersFromSoftStateChecked(
+        softDynamicState, target, context);
+    }
     applyModeDefinitionState();
     if (!clampBodyBeforeMarkers()) return false;
     applyModeDefinitionState();
     if (bodyKinematics == BodyKinematics::SoftBackbone) {
-      if (softBackboneDynamics) {
-        buildLagrangianMarkersFromSoftBackboneState(
-          p, softBackbone, softDynamicState, Vx, Vy, omegaZ,
-          xCm, yCm, theta, dtLbm, target);
-      } else {
-        buildLagrangianMarkersFromSoftBackbone(
-          p, softBackbone, t, Vx, Vy, omegaZ, xCm, yCm, theta, dtLbm,
-          deformationAmpScale(), target);
-      }
+      buildLagrangianMarkersFromSoftBackbone(
+        p, softBackbone, t, Vx, Vy, omegaZ, xCm, yCm, theta, dtLbm,
+        deformationAmpScale(), target);
     } else {
       buildLagrangianMarkers(
         p, t, Vx, Vy, omegaZ, xCm, yCm, theta, dtLbm,
@@ -650,30 +691,7 @@ int main(int argc, char* argv[])
   // ============================================================
   //  History arrays
   // ============================================================
-  std::vector<T> histT, histVx, histVy, histWz;
-  std::vector<T> histFx, histFy, histTz;
-  std::vector<T> histXcm, histYcm, histTheta;
-  std::vector<T> histPower, histEta;
-  // v6 power decomposition: P_total = P_rigid + P_def (per-frame, ds-weighted).
-  std::vector<T> histPowerRigid, histPowerDef;
-  // Marker-local residual slip after the multi-direct-forcing iterations.
-  std::vector<T> histMeanResidualSlip, histMaxResidualSlip;
-  // Experimental soft-backbone coupling diagnostics, in SI torque units
-  // where the marker-force projection can be mapped from lattice units.
-  std::vector<T> histMeanSoftFluidTorqueNm, histMaxSoftFluidTorqueNm;
-  std::vector<T> histMeanSoftAngleStep, histMaxSoftAngleStep;
-  // Body-frame diagnostics
-  std::vector<T> histUswim, histUlat;
-  // forwardNetForce: net hydrodynamic force projected onto the body forward
-  // axis (NOT a separated propulsive thrust).  Renamed from the previous
-  // misleading `Fthrust` / `histFthrust`.
-  std::vector<T> histForwardNetForce, histFlat;
-  std::vector<T> histRe, histSt, histMach, histUstar;
-  // IBM diagnostics are kept separate from the rigid-body forces:
-  //  mean/maxSlip          -> per-marker velocity-mismatch magnitudes
-  //  mean/maxMarkerForce   -> per-marker line-force density magnitudes
-  std::vector<T> histMeanSlip, histMaxSlip;
-  std::vector<T> histMeanMarkerForce, histMaxMarkerForce, histNormalizedSlip;
+  SimulationHistory history;
 
   // ============================================================
   //  Output helpers
@@ -708,23 +726,24 @@ int main(int argc, char* argv[])
     T softAngleStepAccum = 0.0;
     T maxSoftFluidTorqueFrame = 0.0;
     T maxSoftAngleStepFrame = 0.0;
+    T softCouplingResidualAccum = 0.0;
+    T maxSoftCouplingResidualFrame = 0.0;
+    T softCouplingItersAccum = 0.0;
+    T maxSoftCouplingItersFrame = 0.0;
+    T softElasticEnergyAccum = 0.0;
+    T maxSoftElasticEnergyFrame = 0.0;
+    T softDampingPowerAccum = 0.0;
+    T softActuatorPowerAccum = 0.0;
+    T softAbsActuatorPowerAccum = 0.0;
+    T maxAbsSoftActuatorPowerFrame = 0.0;
+    T softAppliedFluidPowerAccum = 0.0;
+    T softAbsAppliedFluidPowerAccum = 0.0;
+    T maxAbsSoftAppliedFluidPowerFrame = 0.0;
     int softDiagSamples = 0;
+    int softCouplingSamples = 0;
     int ibmDiagSamples = 0;
 
-    for (int sub = 0; sub < p.substeps; ++sub) {
-      T tSub = tStart + sub * dtLbm;
-      T tKinematics = kinematicTimeAt(tSub);
-
-      // Coupling order: build the current geometry, evaluate IBM once,
-      // collide-stream the fluid, then update the selected rigid-body DOFs.
-      // Multiple IBM evaluations before one fluid update are avoided because
-      // the interpolated fluid velocity would not change between evaluations.
-      if (!buildMarkersChecked(tKinematics, markers, "main loop")) {
-        return 1;
-      }
-
-      ibmStep(p, markers, xCm, yCm, Vx, Vy, omegaZ, sLattice,
-              alphaIBM, ibmIterations, resetEulerForce, ibmRes);
+    auto accumulateIbmDiagnostics = [&]() {
       if (std::isfinite(ibmRes.meanSlipMag) &&
           std::isfinite(ibmRes.maxSlipMag) &&
           std::isfinite(ibmRes.meanMarkerForceMag) &&
@@ -734,39 +753,236 @@ int main(int argc, char* argv[])
         meanMarkerForceAccum += ibmRes.meanMarkerForceMag;
         meanDesiredSpeedAccum += ibmRes.meanDesiredMarkerSpeedMag;
         maxSlipFrame = std::max(maxSlipFrame, ibmRes.maxSlipMag);
-        maxMarkerForceFrame = std::max(maxMarkerForceFrame, ibmRes.maxMarkerForceMag);
+        maxMarkerForceFrame =
+          std::max(maxMarkerForceFrame, ibmRes.maxMarkerForceMag);
         if (std::isfinite(ibmRes.meanResidualSlipMag) &&
             std::isfinite(ibmRes.maxResidualSlipMag)) {
           meanResidualSlipAccum += ibmRes.meanResidualSlipMag;
-          maxResidualSlipFrame   = std::max(maxResidualSlipFrame,
-                                            ibmRes.maxResidualSlipMag);
+          maxResidualSlipFrame =
+            std::max(maxResidualSlipFrame, ibmRes.maxResidualSlipMag);
         }
         ++ibmDiagSamples;
       }
+    };
+
+    auto accumulateSoftDiagnostics =
+        [&](const SoftBackboneDynamicsDiagnostics& softDynDiag) {
+      if (std::isfinite(softDynDiag.maxAbsFluidSegmentTorqueNm) &&
+          std::isfinite(softDynDiag.maxAbsAngleStep) &&
+          std::isfinite(softDynDiag.elasticEnergyJ) &&
+          std::isfinite(softDynDiag.dampingPowerW) &&
+          std::isfinite(softDynDiag.actuatorPowerProxyW) &&
+          std::isfinite(softDynDiag.absActuatorPowerProxyW) &&
+          std::isfinite(softDynDiag.appliedFluidPowerW) &&
+          std::isfinite(softDynDiag.absAppliedFluidPowerW)) {
+        softFluidTorqueAccum += softDynDiag.maxAbsFluidSegmentTorqueNm;
+        softAngleStepAccum += softDynDiag.maxAbsAngleStep;
+        maxSoftFluidTorqueFrame =
+          std::max(maxSoftFluidTorqueFrame,
+                   softDynDiag.maxAbsFluidSegmentTorqueNm);
+        maxSoftAngleStepFrame =
+          std::max(maxSoftAngleStepFrame,
+                   softDynDiag.maxAbsAngleStep);
+        softElasticEnergyAccum += softDynDiag.elasticEnergyJ;
+        maxSoftElasticEnergyFrame =
+          std::max(maxSoftElasticEnergyFrame,
+                   softDynDiag.elasticEnergyJ);
+        softDampingPowerAccum += softDynDiag.dampingPowerW;
+        softActuatorPowerAccum += softDynDiag.actuatorPowerProxyW;
+        softAbsActuatorPowerAccum += softDynDiag.absActuatorPowerProxyW;
+        maxAbsSoftActuatorPowerFrame =
+          std::max(maxAbsSoftActuatorPowerFrame,
+                   softDynDiag.absActuatorPowerProxyW);
+        softAppliedFluidPowerAccum += softDynDiag.appliedFluidPowerW;
+        softAbsAppliedFluidPowerAccum += softDynDiag.absAppliedFluidPowerW;
+        maxAbsSoftAppliedFluidPowerFrame =
+          std::max(maxAbsSoftAppliedFluidPowerFrame,
+                   softDynDiag.absAppliedFluidPowerW);
+        ++softDiagSamples;
+      }
+    };
+
+    auto wrapAngleLocal = [](T angle) -> T {
+      angle = std::fmod(angle + M_PI, T(2) * M_PI);
+      if (angle < T(0)) angle += T(2) * M_PI;
+      return angle - M_PI;
+    };
+
+    auto backboneStateResidual =
+        [&](const SoftBackboneState& previous,
+            const SoftBackboneState& next) -> T {
+      if (previous.theta.size() != next.theta.size() ||
+          previous.omega.size() != next.omega.size()) {
+        return std::numeric_limits<T>::infinity();
+      }
+      T residual = T(0);
+      for (size_t i = 0; i < previous.theta.size(); ++i) {
+        const T dTheta = std::abs(
+          wrapAngleLocal(next.theta[i] - previous.theta[i]));
+        const T dOmegaAsAngle =
+          std::abs(next.omega[i] - previous.omega[i]) * dtLbm;
+        residual = std::max(residual, std::max(dTheta, dOmegaAsAngle));
+      }
+      return residual;
+    };
+
+    auto relaxedBackboneState =
+        [&](const SoftBackboneState& previous,
+            const SoftBackboneState& next) -> SoftBackboneState {
+      const T relax = config.softBackboneCouplingRelaxation;
+      if (relax >= T(1)) {
+        return next;
+      }
+      SoftBackboneState out = previous;
+      if (out.theta.size() != next.theta.size() ||
+          out.omega.size() != next.omega.size()) {
+        return next;
+      }
+      for (size_t i = 0; i < out.theta.size(); ++i) {
+        out.theta[i] =
+          wrapAngleLocal(out.theta[i] +
+                         relax * wrapAngleLocal(next.theta[i] - out.theta[i]));
+        out.omega[i] += relax * (next.omega[i] - out.omega[i]);
+      }
+      return out;
+    };
+
+    auto accumulateSoftCouplingDiagnostics =
+        [&](T residual, int itersUsed) {
+      if (itersUsed > 0 && std::isfinite(residual)) {
+        softCouplingResidualAccum += residual;
+        maxSoftCouplingResidualFrame =
+          std::max(maxSoftCouplingResidualFrame, residual);
+        softCouplingItersAccum += T(itersUsed);
+        maxSoftCouplingItersFrame =
+          std::max(maxSoftCouplingItersFrame, T(itersUsed));
+        ++softCouplingSamples;
+      }
+    };
+
+    auto filteredSoftTorqueCandidate =
+        [&](const std::vector<T>& rawTorque,
+            const std::vector<T>& filterStart,
+            bool filterInitializedAtStepStart) -> std::vector<T> {
+      const T filterTime = config.softBackboneFluidTorqueFilterTime;
+      if (!(filterTime > T(0)) || rawTorque.empty() ||
+          !filterInitializedAtStepStart ||
+          filterStart.size() != rawTorque.size()) {
+        return rawTorque;
+      }
+      const T alpha = T(1) - std::exp(-dtLbm / filterTime);
+      std::vector<T> filtered = rawTorque;
+      for (size_t i = 0; i < rawTorque.size(); ++i) {
+        filtered[i] = filterStart[i] + alpha * (rawTorque[i] - filterStart[i]);
+      }
+      return filtered;
+    };
+
+    auto commitFilteredSoftTorque =
+        [&](const std::vector<T>& torqueForDynamics) {
+      if (config.softBackboneFluidTorqueFilterTime > T(0) &&
+          !torqueForDynamics.empty()) {
+        filteredSoftSegmentTorqueNm = torqueForDynamics;
+        softTorqueFilterInitialized = true;
+      }
+    };
+
+    for (int sub = 0; sub < p.substeps; ++sub) {
+      T tSub = tStart + sub * dtLbm;
+      T tKinematics = kinematicTimeAt(tSub);
+
+      // Coupling order: build geometry, evaluate IBM, optionally solve a
+      // fixed-point soft-backbone update from the same t^n state, then stream
+      // the final IBM force field once.
       if (softBackboneDynamics &&
-          bodyKinematics == BodyKinematics::SoftBackbone) {
-        const SoftBackboneForceProjection softProjection =
-          projectMarkerForcesToSoftBackbone(
-            p, softBackbone, softDynamicState, xCm, yCm, theta, markers);
+          bodyKinematics == BodyKinematics::SoftBackbone &&
+          softBackboneCouplingIterations > 1) {
+        const SoftBackboneState stateAtStepStart = softDynamicState;
         const SoftBackboneState preferredNext =
           preferredBackboneStateWave(
             p, softBackbone, tKinematics + dtLbm, dtLbm,
             deformationAmpScale());
-        const SoftBackboneDynamicsDiagnostics softDynDiag =
-          advanceSoftBackboneImplicit(
-            softBackbone, preferredNext, softProjection.segmentTorqueNm,
-            dtLbm, softDynamicsParams, softDynamicState);
-        if (std::isfinite(softDynDiag.maxAbsFluidSegmentTorqueNm) &&
-            std::isfinite(softDynDiag.maxAbsAngleStep)) {
-          softFluidTorqueAccum += softDynDiag.maxAbsFluidSegmentTorqueNm;
-          softAngleStepAccum += softDynDiag.maxAbsAngleStep;
-          maxSoftFluidTorqueFrame =
-            std::max(maxSoftFluidTorqueFrame,
-                     softDynDiag.maxAbsFluidSegmentTorqueNm);
-          maxSoftAngleStepFrame =
-            std::max(maxSoftAngleStepFrame,
-                     softDynDiag.maxAbsAngleStep);
-          ++softDiagSamples;
+        SoftBackboneState guessState = stateAtStepStart;
+        const std::vector<T> filterStart = filteredSoftSegmentTorqueNm;
+        const bool filterInitializedAtStepStart = softTorqueFilterInitialized;
+        std::vector<T> torqueForDynamics;
+        SoftBackboneDynamicsDiagnostics softDynDiag;
+        T couplingResidual = std::numeric_limits<T>::infinity();
+        int couplingItersUsed = 0;
+        for (int couplingIter = 0;
+             couplingIter < softBackboneCouplingIterations;
+             ++couplingIter) {
+          const SoftBackboneState previousGuess = guessState;
+          if (!buildMarkersFromSoftStateChecked(
+                guessState, markers, "soft-backbone coupling")) {
+            return 1;
+          }
+          ibmStep(p, markers, xCm, yCm, Vx, Vy, omegaZ, sLattice,
+                  alphaIBM, ibmIterations, resetEulerForce, ibmRes);
+          const SoftBackboneForceProjection softProjection =
+            projectMarkerForcesToSoftBackbone(
+              p, softBackbone, guessState, xCm, yCm, theta, markers,
+              config.softBackboneLoadProjection);
+          torqueForDynamics =
+            filteredSoftTorqueCandidate(softProjection.segmentTorqueNm,
+                                        filterStart,
+                                        filterInitializedAtStepStart);
+          SoftBackboneState nextState = stateAtStepStart;
+          softDynDiag = advanceSoftBackboneImplicit(
+            softBackbone, preferredNext, torqueForDynamics,
+            dtLbm, softDynamicsParams, nextState);
+          guessState = relaxedBackboneState(previousGuess, nextState);
+          couplingResidual =
+            backboneStateResidual(previousGuess, guessState);
+          couplingItersUsed = couplingIter + 1;
+          if (config.softBackboneCouplingTolerance > T(0) &&
+              couplingResidual <= config.softBackboneCouplingTolerance) {
+            break;
+          }
+        }
+        commitFilteredSoftTorque(torqueForDynamics);
+        softDynamicState = guessState;
+        if (!buildMarkersFromSoftStateChecked(
+              softDynamicState, markers, "soft-backbone coupling final")) {
+          return 1;
+        }
+        ibmStep(p, markers, xCm, yCm, Vx, Vy, omegaZ, sLattice,
+                alphaIBM, ibmIterations, resetEulerForce, ibmRes);
+        accumulateIbmDiagnostics();
+        accumulateSoftDiagnostics(softDynDiag);
+        accumulateSoftCouplingDiagnostics(couplingResidual,
+                                          couplingItersUsed);
+      } else {
+        if (!buildMarkersChecked(tKinematics, markers, "main loop")) {
+          return 1;
+        }
+        ibmStep(p, markers, xCm, yCm, Vx, Vy, omegaZ, sLattice,
+                alphaIBM, ibmIterations, resetEulerForce, ibmRes);
+        accumulateIbmDiagnostics();
+        if (softBackboneDynamics &&
+            bodyKinematics == BodyKinematics::SoftBackbone) {
+          const SoftBackboneForceProjection softProjection =
+            projectMarkerForcesToSoftBackbone(
+              p, softBackbone, softDynamicState, xCm, yCm, theta, markers,
+              config.softBackboneLoadProjection);
+          const std::vector<T> filterStart = filteredSoftSegmentTorqueNm;
+          const bool filterInitializedAtStepStart =
+            softTorqueFilterInitialized;
+          const std::vector<T> torqueForDynamics =
+            filteredSoftTorqueCandidate(softProjection.segmentTorqueNm,
+                                        filterStart,
+                                        filterInitializedAtStepStart);
+          commitFilteredSoftTorque(torqueForDynamics);
+          const SoftBackboneState preferredNext =
+            preferredBackboneStateWave(
+              p, softBackbone, tKinematics + dtLbm, dtLbm,
+              deformationAmpScale());
+          const SoftBackboneDynamicsDiagnostics softDynDiag =
+            advanceSoftBackboneImplicit(
+              softBackbone, preferredNext, torqueForDynamics,
+              dtLbm, softDynamicsParams, softDynamicState);
+          accumulateSoftDiagnostics(softDynDiag);
+          accumulateSoftCouplingDiagnostics(T(0), 1);
         }
       }
       sLattice.collideAndStream();
@@ -822,6 +1038,14 @@ int main(int argc, char* argv[])
     T normalizedSlipFrame = 0.0;
     T meanSoftFluidTorqueFrame = 0.0;
     T meanSoftAngleStepFrame = 0.0;
+    T softCouplingResidualFrame = 0.0;
+    T softCouplingItersUsedFrame = 0.0;
+    T meanSoftElasticEnergyFrame = 0.0;
+    T meanSoftDampingPowerFrame = 0.0;
+    T meanSoftActuatorPowerProxyFrame = 0.0;
+    T meanAbsSoftActuatorPowerProxyFrame = 0.0;
+    T meanSoftAppliedFluidPowerFrame = 0.0;
+    T meanAbsSoftAppliedFluidPowerFrame = 0.0;
     if (ibmDiagSamples > 0) {
       const T invDiag = T(1) / T(ibmDiagSamples);
       meanSlipFrame = meanSlipAccum * invDiag;
@@ -836,6 +1060,23 @@ int main(int argc, char* argv[])
       const T invSoft = T(1) / T(softDiagSamples);
       meanSoftFluidTorqueFrame = softFluidTorqueAccum * invSoft;
       meanSoftAngleStepFrame = softAngleStepAccum * invSoft;
+      meanSoftElasticEnergyFrame = softElasticEnergyAccum * invSoft;
+      meanSoftDampingPowerFrame = softDampingPowerAccum * invSoft;
+      meanSoftActuatorPowerProxyFrame =
+        softActuatorPowerAccum * invSoft;
+      meanAbsSoftActuatorPowerProxyFrame =
+        softAbsActuatorPowerAccum * invSoft;
+      meanSoftAppliedFluidPowerFrame =
+        softAppliedFluidPowerAccum * invSoft;
+      meanAbsSoftAppliedFluidPowerFrame =
+        softAbsAppliedFluidPowerAccum * invSoft;
+    }
+    if (softCouplingSamples > 0) {
+      const T invSoftCoupling = T(1) / T(softCouplingSamples);
+      softCouplingResidualFrame =
+        softCouplingResidualAccum * invSoftCoupling;
+      softCouplingItersUsedFrame =
+        softCouplingItersAccum * invSoftCoupling;
     }
     if (!std::isfinite(FxAvg) || !std::isfinite(FyAvg) ||
         !std::isfinite(TzAvg) || !std::isfinite(PAvg)) {
@@ -884,39 +1125,31 @@ int main(int argc, char* argv[])
     // Store history
     const T tFrame = tStart + p.dtAnim;
 
-    histT.push_back(tFrame);
-    histVx.push_back(Vx);
-    histVy.push_back(Vy);
-    histWz.push_back(omegaZ);
-    histFx.push_back(FxAvg);
-    histFy.push_back(FyAvg);
-    histTz.push_back(TzAvg);
-    histXcm.push_back(xCm);
-    histYcm.push_back(yCm);
-    histTheta.push_back(theta);
-    histPower.push_back(PAvg);
-    histEta.push_back(eta);
-    histUswim.push_back(Uswim);
-    histUlat.push_back(Ulateral);
-    histForwardNetForce.push_back(forwardNetForce);
-    histFlat.push_back(Flat);
-    histRe.push_back(Re_inst);
-    histSt.push_back(St_inst);
-    histMach.push_back(machLat);
-    histUstar.push_back(Ustar);
-    histMeanSlip.push_back(meanSlipFrame);
-    histMaxSlip.push_back(maxSlipFrame);
-    histMeanMarkerForce.push_back(meanMarkerForceFrame);
-    histMaxMarkerForce.push_back(maxMarkerForceFrame);
-    histNormalizedSlip.push_back(normalizedSlipFrame);
-    histPowerRigid.push_back(PRigidAvg);
-    histPowerDef.push_back(PDefAvg);
-    histMeanResidualSlip.push_back(meanResidualSlipFrame);
-    histMaxResidualSlip.push_back(maxResidualSlipFrame);
-    histMeanSoftFluidTorqueNm.push_back(meanSoftFluidTorqueFrame);
-    histMaxSoftFluidTorqueNm.push_back(maxSoftFluidTorqueFrame);
-    histMeanSoftAngleStep.push_back(meanSoftAngleStepFrame);
-    histMaxSoftAngleStep.push_back(maxSoftAngleStepFrame);
+    history.append({
+      tFrame, Vx, Vy, omegaZ,
+      FxAvg, FyAvg, TzAvg,
+      xCm, yCm, theta,
+      PAvg, eta,
+      Uswim, Ulateral, forwardNetForce, Flat,
+      Re_inst, St_inst, machLat, Ustar,
+      meanSlipFrame, maxSlipFrame,
+      meanMarkerForceFrame, maxMarkerForceFrame,
+      normalizedSlipFrame,
+      PRigidAvg, PDefAvg,
+      meanResidualSlipFrame, maxResidualSlipFrame,
+      meanSoftFluidTorqueFrame, maxSoftFluidTorqueFrame,
+      meanSoftAngleStepFrame, maxSoftAngleStepFrame,
+      softCouplingResidualFrame, maxSoftCouplingResidualFrame,
+      softCouplingItersUsedFrame, maxSoftCouplingItersFrame,
+      meanSoftElasticEnergyFrame, maxSoftElasticEnergyFrame,
+      meanSoftDampingPowerFrame,
+      meanSoftActuatorPowerProxyFrame,
+      meanAbsSoftActuatorPowerProxyFrame,
+      maxAbsSoftActuatorPowerFrame,
+      meanSoftAppliedFluidPowerFrame,
+      meanAbsSoftAppliedFluidPowerFrame,
+      maxAbsSoftAppliedFluidPowerFrame
+    });
 
     // Console output
     clout << "frame " << frame << "/" << nFrames
@@ -937,6 +1170,11 @@ int main(int argc, char* argv[])
           << "  maxMarkerForce=" << maxMarkerForceFrame
           << "  softTau=" << meanSoftFluidTorqueFrame
           << "  softStep=" << meanSoftAngleStepFrame
+          << "  softCoupleRes=" << softCouplingResidualFrame
+          << "  softCoupleIter=" << softCouplingItersUsedFrame
+          << "  Esoft=" << meanSoftElasticEnergyFrame
+          << "  Pdamp=" << meanSoftDampingPowerFrame
+          << "  PactProxy=" << meanAbsSoftActuatorPowerProxyFrame
           << "  th=" << (theta * 180.0 / M_PI) << "deg"
           << "  eta=" << eta
           << std::endl;
@@ -973,7 +1211,13 @@ int main(int argc, char* argv[])
         !std::isfinite(meanSoftAngleStepFrame) ||
         !std::isfinite(maxSoftAngleStepFrame) ||
         !std::isfinite(meanSoftFluidTorqueFrame) ||
-        !std::isfinite(maxSoftFluidTorqueFrame);
+        !std::isfinite(maxSoftFluidTorqueFrame) ||
+        !std::isfinite(softCouplingResidualFrame) ||
+        !std::isfinite(maxSoftCouplingResidualFrame) ||
+        !std::isfinite(meanSoftElasticEnergyFrame) ||
+        !std::isfinite(meanSoftDampingPowerFrame) ||
+        !std::isfinite(meanAbsSoftActuatorPowerProxyFrame) ||
+        !std::isfinite(meanAbsSoftAppliedFluidPowerFrame);
       const bool excessiveSlip =
         (config.softBackboneAbortMeanSlip > T(0) &&
          meanSlipFrame > config.softBackboneAbortMeanSlip) ||
@@ -993,6 +1237,9 @@ int main(int argc, char* argv[])
               << "  maxSoftFluidTorqueNm=" << maxSoftFluidTorqueFrame
               << "  meanSoftAngleStep=" << meanSoftAngleStepFrame
               << "  maxSoftAngleStep=" << maxSoftAngleStepFrame
+              << "  softCouplingResidual=" << softCouplingResidualFrame
+              << "  maxSoftCouplingResidual=" << maxSoftCouplingResidualFrame
+              << "  softCouplingItersUsed=" << softCouplingItersUsedFrame
               << "  saturatedFrames="
               << softBackboneSaturatedFrameCount
               << "  limits(meanSlip="
@@ -1095,12 +1342,14 @@ int main(int argc, char* argv[])
   //  Append one-run aspect-ratio summary
   // ============================================================
   SteadySummary steady = computeSteadySummary(
-    histT, histUswim, histPower, histForwardNetForce, histFlat,
-    histRe, histSt, histUstar, histEta,
-    histMeanSlip, histMaxSlip, histMeanMarkerForce, histMaxMarkerForce,
-    histNormalizedSlip,
-    histPowerRigid, histPowerDef,
-    histMeanResidualSlip, histMaxResidualSlip,
+    history.histT, history.histUswim, history.histPower,
+    history.histForwardNetForce, history.histFlat,
+    history.histRe, history.histSt, history.histUstar, history.histEta,
+    history.histMeanSlip, history.histMaxSlip,
+    history.histMeanMarkerForce, history.histMaxMarkerForce,
+    history.histNormalizedSlip,
+    history.histPowerRigid, history.histPowerDef,
+    history.histMeanResidualSlip, history.histMaxResidualSlip,
     tCut, mass);
 
   if (steady.nSamples == 0) {
@@ -1111,9 +1360,9 @@ int main(int argc, char* argv[])
   auto meanAfterTCut = [&](const std::vector<T>& values) -> T {
     T sum = T(0);
     int n = 0;
-    const size_t nLimit = std::min(histT.size(), values.size());
+    const size_t nLimit = std::min(history.histT.size(), values.size());
     for (size_t i = 0; i < nLimit; ++i) {
-      if (!(histT[i] > tCut) || !std::isfinite(values[i])) continue;
+      if (!(history.histT[i] > tCut) || !std::isfinite(values[i])) continue;
       sum += values[i];
       ++n;
     }
@@ -1121,19 +1370,60 @@ int main(int argc, char* argv[])
   };
   auto maxAfterTCut = [&](const std::vector<T>& values) -> T {
     T maxValue = T(0);
-    const size_t nLimit = std::min(histT.size(), values.size());
+    const size_t nLimit = std::min(history.histT.size(), values.size());
     for (size_t i = 0; i < nLimit; ++i) {
-      if (!(histT[i] > tCut) || !std::isfinite(values[i])) continue;
+      if (!(history.histT[i] > tCut) || !std::isfinite(values[i])) continue;
       maxValue = std::max(maxValue, std::abs(values[i]));
     }
     return maxValue;
   };
   const T steadyMeanSoftFluidTorqueNm =
-    meanAfterTCut(histMeanSoftFluidTorqueNm);
+    meanAfterTCut(history.histMeanSoftFluidTorqueNm);
   const T steadyMaxSoftFluidTorqueNm =
-    maxAfterTCut(histMaxSoftFluidTorqueNm);
-  const T steadyMeanSoftAngleStep = meanAfterTCut(histMeanSoftAngleStep);
-  const T steadyMaxSoftAngleStep = maxAfterTCut(histMaxSoftAngleStep);
+    maxAfterTCut(history.histMaxSoftFluidTorqueNm);
+  const T steadyMeanSoftAngleStep = meanAfterTCut(history.histMeanSoftAngleStep);
+  const T steadyMaxSoftAngleStep = maxAfterTCut(history.histMaxSoftAngleStep);
+  const T steadyMeanSoftCouplingResidual =
+    meanAfterTCut(history.histSoftCouplingResidual);
+  const T steadyMaxSoftCouplingResidual =
+    maxAfterTCut(history.histMaxSoftCouplingResidual);
+  const T steadyMeanSoftCouplingItersUsed =
+    meanAfterTCut(history.histSoftCouplingItersUsed);
+  const T steadyMaxSoftCouplingItersUsed =
+    maxAfterTCut(history.histMaxSoftCouplingItersUsed);
+  const T steadyMeanSoftElasticEnergyJ =
+    meanAfterTCut(history.histSoftElasticEnergyJ);
+  const T steadyMaxSoftElasticEnergyJ =
+    maxAfterTCut(history.histMaxSoftElasticEnergyJ);
+  const T steadyMeanSoftDampingPowerW =
+    meanAfterTCut(history.histSoftDampingPowerW);
+  const T steadyMeanSoftActuatorPowerProxyW =
+    meanAfterTCut(history.histSoftActuatorPowerProxyW);
+  const T steadyMeanAbsSoftActuatorPowerProxyW =
+    meanAfterTCut(history.histAbsSoftActuatorPowerProxyW);
+  const T steadyMaxAbsSoftActuatorPowerProxyW =
+    maxAfterTCut(history.histMaxAbsSoftActuatorPowerProxyW);
+  const T steadyMeanSoftAppliedFluidPowerW =
+    meanAfterTCut(history.histSoftAppliedFluidPowerW);
+  const T steadyMeanAbsSoftAppliedFluidPowerW =
+    meanAfterTCut(history.histAbsSoftAppliedFluidPowerW);
+  const T steadyMaxAbsSoftAppliedFluidPowerW =
+    maxAfterTCut(history.histMaxAbsSoftAppliedFluidPowerW);
+
+  const T dxM = (p.totalGeometricLengthLU() > T(0))
+              ? p.physicalBodyLengthM / p.totalGeometricLengthLU()
+              : T(0);
+  const T steadyMeanUPhysicalMps =
+    (dxM > T(0) && dtLbm > T(0)) ? steady.meanU * dxM / dtLbm : T(0);
+  const T softBodyMassKg =
+    (rodSection.valid && rodSection.massPerLengthKgM > T(0))
+      ? rodSection.massPerLengthKgM * rodSection.physicalLengthM
+      : T(0);
+  const T cotSoftActuatorProxySI =
+    (softBodyMassKg > T(1e-12) && steadyMeanUPhysicalMps > T(1e-12))
+      ? steadyMeanAbsSoftActuatorPowerProxyW
+        / (softBodyMassKg * steadyMeanUPhysicalMps)
+      : T(0);
 
   const int recommendedSteadySamples = recommendedSteadySampleCount(p);
   const bool enoughSteadySamples = (steady.nSamples >= recommendedSteadySamples);
@@ -1141,14 +1431,15 @@ int main(int argc, char* argv[])
   // ----------------------------------------------------------------
   //  Cycle-averaged steady-state diagnostics
   // ----------------------------------------------------------------
-  //  period = 1 / eelFreq (physical seconds, same units as histT).  Bins
-  //  start at the first sample with t > tCut.  Convergence is reported over
-  //  the last min(5, nCycles) complete cycles.
+  //  period = 1 / eelFreq (physical seconds, same units as history time
+  //  samples).  Bins start at the first sample with t > tCut.  Convergence is
+  //  reported over the last min(5, nCycles) complete cycles.
   const T cyclePeriod = (p.eelFreq > T(1e-12)) ? (T(1) / p.eelFreq) : T(0);
   std::vector<CycleAverage> cycles = computeCycleAverages(
-    histT, histUswim, histPower, histForwardNetForce,
-    histRe, histSt, histUstar,
-    histMeanSlip, histNormalizedSlip,
+    history.histT, history.histUswim, history.histPower,
+    history.histForwardNetForce,
+    history.histRe, history.histSt, history.histUstar,
+    history.histMeanSlip, history.histNormalizedSlip,
     tCut, cyclePeriod, mass);
   const CycleConvergence cycleConv = computeCycleConvergence(cycles);
 
@@ -1178,11 +1469,52 @@ int main(int argc, char* argv[])
   summaryInput.softBackboneRelaxationTime = config.softBackboneRelaxationTime;
   summaryInput.softBackboneFluidTorqueScale =
     config.softBackboneFluidTorqueScale;
+  summaryInput.softBackboneFluidTorqueFilterTime =
+    config.softBackboneFluidTorqueFilterTime;
+  summaryInput.softBackboneAddedMassFrac =
+    config.softBackboneAddedMassFrac;
   summaryInput.softBackboneMaxAngleStep = config.softBackboneMaxAngleStep;
+  summaryInput.softBackboneCouplingIterations =
+    config.softBackboneCouplingIterations;
+  summaryInput.softBackboneCouplingRelaxation =
+    config.softBackboneCouplingRelaxation;
+  summaryInput.softBackboneCouplingTolerance =
+    config.softBackboneCouplingTolerance;
+  summaryInput.softBackboneLoadProjection =
+    config.softBackboneLoadProjection;
   summaryInput.meanSoftFluidTorqueNm = steadyMeanSoftFluidTorqueNm;
   summaryInput.maxSoftFluidTorqueNm = steadyMaxSoftFluidTorqueNm;
   summaryInput.meanSoftAngleStep = steadyMeanSoftAngleStep;
   summaryInput.maxSoftAngleStep = steadyMaxSoftAngleStep;
+  summaryInput.meanSoftCouplingResidual =
+    steadyMeanSoftCouplingResidual;
+  summaryInput.maxSoftCouplingResidual =
+    steadyMaxSoftCouplingResidual;
+  summaryInput.meanSoftCouplingItersUsed =
+    steadyMeanSoftCouplingItersUsed;
+  summaryInput.maxSoftCouplingItersUsed =
+    steadyMaxSoftCouplingItersUsed;
+  summaryInput.meanSoftElasticEnergyJ =
+    steadyMeanSoftElasticEnergyJ;
+  summaryInput.maxSoftElasticEnergyJ =
+    steadyMaxSoftElasticEnergyJ;
+  summaryInput.meanSoftDampingPowerW =
+    steadyMeanSoftDampingPowerW;
+  summaryInput.meanSoftActuatorPowerProxyW =
+    steadyMeanSoftActuatorPowerProxyW;
+  summaryInput.meanAbsSoftActuatorPowerProxyW =
+    steadyMeanAbsSoftActuatorPowerProxyW;
+  summaryInput.maxAbsSoftActuatorPowerProxyW =
+    steadyMaxAbsSoftActuatorPowerProxyW;
+  summaryInput.meanSoftAppliedFluidPowerW =
+    steadyMeanSoftAppliedFluidPowerW;
+  summaryInput.meanAbsSoftAppliedFluidPowerW =
+    steadyMeanAbsSoftAppliedFluidPowerW;
+  summaryInput.maxAbsSoftAppliedFluidPowerW =
+    steadyMaxAbsSoftAppliedFluidPowerW;
+  summaryInput.softBodyMassKg = softBodyMassKg;
+  summaryInput.meanUPhysicalMps = steadyMeanUPhysicalMps;
+  summaryInput.cotSoftActuatorProxySI = cotSoftActuatorProxySI;
 
   const CsvWriteResult arCsvResult = appendArSummaryCsv(summaryCsv, summaryInput);
   if (arCsvResult.resolution.headerMismatch) {
@@ -1226,11 +1558,52 @@ int main(int argc, char* argv[])
     config.softBackboneRelaxationTime;
   verificationInput.softBackboneFluidTorqueScale =
     config.softBackboneFluidTorqueScale;
+  verificationInput.softBackboneFluidTorqueFilterTime =
+    config.softBackboneFluidTorqueFilterTime;
+  verificationInput.softBackboneAddedMassFrac =
+    config.softBackboneAddedMassFrac;
   verificationInput.softBackboneMaxAngleStep = config.softBackboneMaxAngleStep;
+  verificationInput.softBackboneCouplingIterations =
+    config.softBackboneCouplingIterations;
+  verificationInput.softBackboneCouplingRelaxation =
+    config.softBackboneCouplingRelaxation;
+  verificationInput.softBackboneCouplingTolerance =
+    config.softBackboneCouplingTolerance;
+  verificationInput.softBackboneLoadProjection =
+    config.softBackboneLoadProjection;
   verificationInput.meanSoftFluidTorqueNm = steadyMeanSoftFluidTorqueNm;
   verificationInput.maxSoftFluidTorqueNm = steadyMaxSoftFluidTorqueNm;
   verificationInput.meanSoftAngleStep = steadyMeanSoftAngleStep;
   verificationInput.maxSoftAngleStep = steadyMaxSoftAngleStep;
+  verificationInput.meanSoftCouplingResidual =
+    steadyMeanSoftCouplingResidual;
+  verificationInput.maxSoftCouplingResidual =
+    steadyMaxSoftCouplingResidual;
+  verificationInput.meanSoftCouplingItersUsed =
+    steadyMeanSoftCouplingItersUsed;
+  verificationInput.maxSoftCouplingItersUsed =
+    steadyMaxSoftCouplingItersUsed;
+  verificationInput.meanSoftElasticEnergyJ =
+    steadyMeanSoftElasticEnergyJ;
+  verificationInput.maxSoftElasticEnergyJ =
+    steadyMaxSoftElasticEnergyJ;
+  verificationInput.meanSoftDampingPowerW =
+    steadyMeanSoftDampingPowerW;
+  verificationInput.meanSoftActuatorPowerProxyW =
+    steadyMeanSoftActuatorPowerProxyW;
+  verificationInput.meanAbsSoftActuatorPowerProxyW =
+    steadyMeanAbsSoftActuatorPowerProxyW;
+  verificationInput.maxAbsSoftActuatorPowerProxyW =
+    steadyMaxAbsSoftActuatorPowerProxyW;
+  verificationInput.meanSoftAppliedFluidPowerW =
+    steadyMeanSoftAppliedFluidPowerW;
+  verificationInput.meanAbsSoftAppliedFluidPowerW =
+    steadyMeanAbsSoftAppliedFluidPowerW;
+  verificationInput.maxAbsSoftAppliedFluidPowerW =
+    steadyMaxAbsSoftAppliedFluidPowerW;
+  verificationInput.softBodyMassKg = softBodyMassKg;
+  verificationInput.meanUPhysicalMps = steadyMeanUPhysicalMps;
+  verificationInput.cotSoftActuatorProxySI = cotSoftActuatorProxySI;
 
   const CsvWriteResult sensitivityCsvResult = appendVerificationSummaryCsv(sensitivityCsv, verificationInput);
   if (sensitivityCsvResult.resolution.headerMismatch) {
@@ -1270,6 +1643,8 @@ int main(int argc, char* argv[])
         << "transportEfficiencyProxy, and meanU." << std::endl;
   clout << "cyclePeriod=" << cyclePeriod
         << "  nSteadyCycles=" << cycleConv.nSteadyCycles
+        << "  cycleMeanUswim=" << cycleConv.cycleMeanUswim
+        << "  cycleCvUswim=" << cycleConv.cycleCvUswim
         << "  cycleMeanUstar=" << cycleConv.cycleMeanUstar
         << "  cycleCvUstar=" << cycleConv.cycleCvUstar
         << "  cycleMeanCoT=" << cycleConv.cycleMeanCoT
@@ -1299,13 +1674,45 @@ int main(int argc, char* argv[])
   if (bodyKinematics == BodyKinematics::SoftBackbone) {
     clout << "Soft backbone dynamics: enabled="
           << (softBackboneDynamics ? 1 : 0)
-          << "  relaxationTime=" << config.softBackboneRelaxationTime
           << "  fluidTorqueScale=" << config.softBackboneFluidTorqueScale
+          << "  fluidTorqueFilterTime="
+          << config.softBackboneFluidTorqueFilterTime
           << "  maxAngleStepLimit=" << config.softBackboneMaxAngleStep
+          << "  couplingIterations="
+          << config.softBackboneCouplingIterations
+          << "  couplingRelaxation="
+          << config.softBackboneCouplingRelaxation
+          << "  couplingTolerance="
+          << config.softBackboneCouplingTolerance
+          << "  loadProjection="
+          << softBackboneLoadProjectionName(
+               config.softBackboneLoadProjection)
           << "  meanSoftFluidTorqueNm=" << steadyMeanSoftFluidTorqueNm
           << "  maxSoftFluidTorqueNm=" << steadyMaxSoftFluidTorqueNm
           << "  meanSoftAngleStep=" << steadyMeanSoftAngleStep
-          << "  maxSoftAngleStep=" << steadyMaxSoftAngleStep << std::endl;
+          << "  maxSoftAngleStep=" << steadyMaxSoftAngleStep
+          << "  meanSoftCouplingResidual="
+          << steadyMeanSoftCouplingResidual
+          << "  maxSoftCouplingResidual="
+          << steadyMaxSoftCouplingResidual
+          << "  meanSoftCouplingItersUsed="
+          << steadyMeanSoftCouplingItersUsed
+          << "  maxSoftCouplingItersUsed="
+          << steadyMaxSoftCouplingItersUsed
+          << "  meanSoftElasticEnergyJ="
+          << steadyMeanSoftElasticEnergyJ
+          << "  maxSoftElasticEnergyJ="
+          << steadyMaxSoftElasticEnergyJ
+          << "  meanSoftDampingPowerW="
+          << steadyMeanSoftDampingPowerW
+          << "  meanAbsSoftActuatorPowerProxyW="
+          << steadyMeanAbsSoftActuatorPowerProxyW
+          << "  meanAbsSoftAppliedFluidPowerW="
+          << steadyMeanAbsSoftAppliedFluidPowerW
+          << "  meanUPhysicalMps="
+          << steadyMeanUPhysicalMps
+          << "  cotSoftActuatorProxySI="
+          << cotSoftActuatorProxySI << std::endl;
   }
   clout << "Power decomposition (steady window): "
         << "meanConstraintPower=" << steady.meanConstraintPower
@@ -1334,41 +1741,7 @@ int main(int argc, char* argv[])
   //  Save time-series data
   // ============================================================
   {
-    HistoryCsvData historyCsv;
-    historyCsv.histT = &histT;
-    historyCsv.histVx = &histVx;
-    historyCsv.histVy = &histVy;
-    historyCsv.histWz = &histWz;
-    historyCsv.histFx = &histFx;
-    historyCsv.histFy = &histFy;
-    historyCsv.histTz = &histTz;
-    historyCsv.histXcm = &histXcm;
-    historyCsv.histYcm = &histYcm;
-    historyCsv.histTheta = &histTheta;
-    historyCsv.histPower = &histPower;
-    historyCsv.histEta = &histEta;
-    historyCsv.histUswim = &histUswim;
-    historyCsv.histUlat = &histUlat;
-    historyCsv.histForwardNetForce = &histForwardNetForce;
-    historyCsv.histFlat = &histFlat;
-    historyCsv.histRe = &histRe;
-    historyCsv.histSt = &histSt;
-    historyCsv.histMach = &histMach;
-    historyCsv.histUstar = &histUstar;
-    historyCsv.histMeanSlip = &histMeanSlip;
-    historyCsv.histMaxSlip = &histMaxSlip;
-    historyCsv.histMeanMarkerForce = &histMeanMarkerForce;
-    historyCsv.histMaxMarkerForce = &histMaxMarkerForce;
-    historyCsv.histNormalizedSlip = &histNormalizedSlip;
-    historyCsv.histPowerRigid = &histPowerRigid;
-    historyCsv.histPowerDef = &histPowerDef;
-    historyCsv.histMeanResidualSlip = &histMeanResidualSlip;
-    historyCsv.histMaxResidualSlip = &histMaxResidualSlip;
-    historyCsv.histMeanSoftFluidTorqueNm = &histMeanSoftFluidTorqueNm;
-    historyCsv.histMaxSoftFluidTorqueNm = &histMaxSoftFluidTorqueNm;
-    historyCsv.histMeanSoftAngleStep = &histMeanSoftAngleStep;
-    historyCsv.histMaxSoftAngleStep = &histMaxSoftAngleStep;
-    const std::string fname = writeHistoryCsv(runOutDir, historyCsv);
+    const std::string fname = writeHistoryCsv(runOutDir, history.csvData());
     clout << "Saved history: " << fname << std::endl;
   }
 

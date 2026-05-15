@@ -28,7 +28,7 @@ struct SummaryCsvInputs {
   SimulationCase simCase = SimulationCase::SurgeOnly;
   WarmupMode warmupMode = WarmupMode::Rest;
   WallBoundary wallBoundary = WallBoundary::NoSlip;
-  BodyKinematics bodyKinematics = BodyKinematics::PrescribedWave;
+  BodyKinematics bodyKinematics = BodyKinematics::SoftBackbone;
   bool initialPlacementClamped = false;
   std::uint64_t initialPlacementClampCount = 0;
   bool runtimeDomainClampHit = false;
@@ -46,11 +46,34 @@ struct SummaryCsvInputs {
   bool softBackboneDynamics = false;
   T softBackboneRelaxationTime = 0;
   T softBackboneFluidTorqueScale = 0;
+  T softBackboneFluidTorqueFilterTime = 0;
+  T softBackboneAddedMassFrac = 0;
   T softBackboneMaxAngleStep = 0;
+  int softBackboneCouplingIterations = 1;
+  T softBackboneCouplingRelaxation = 1;
+  T softBackboneCouplingTolerance = 0;
+  SoftBackboneLoadProjection softBackboneLoadProjection =
+    SoftBackboneLoadProjection::SegmentCentroid;
   T meanSoftFluidTorqueNm = 0;
   T maxSoftFluidTorqueNm = 0;
   T meanSoftAngleStep = 0;
   T maxSoftAngleStep = 0;
+  T meanSoftCouplingResidual = 0;
+  T maxSoftCouplingResidual = 0;
+  T meanSoftCouplingItersUsed = 0;
+  T maxSoftCouplingItersUsed = 0;
+  T meanSoftElasticEnergyJ = 0;
+  T maxSoftElasticEnergyJ = 0;
+  T meanSoftDampingPowerW = 0;
+  T meanSoftActuatorPowerProxyW = 0;
+  T meanAbsSoftActuatorPowerProxyW = 0;
+  T maxAbsSoftActuatorPowerProxyW = 0;
+  T meanSoftAppliedFluidPowerW = 0;
+  T meanAbsSoftAppliedFluidPowerW = 0;
+  T maxAbsSoftAppliedFluidPowerW = 0;
+  T softBodyMassKg = 0;
+  T meanUPhysicalMps = 0;
+  T cotSoftActuatorProxySI = 0;
 };
 
 struct VerificationCsvInputs {
@@ -62,7 +85,7 @@ struct VerificationCsvInputs {
   StudyMode studyMode = StudyMode::Standard;
   WarmupMode warmupMode = WarmupMode::Rest;
   WallBoundary wallBoundary = WallBoundary::NoSlip;
-  BodyKinematics bodyKinematics = BodyKinematics::PrescribedWave;
+  BodyKinematics bodyKinematics = BodyKinematics::SoftBackbone;
   bool initialPlacementClamped = false;
   std::uint64_t initialPlacementClampCount = 0;
   bool runtimeDomainClampHit = false;
@@ -81,11 +104,83 @@ struct VerificationCsvInputs {
   bool softBackboneDynamics = false;
   T softBackboneRelaxationTime = 0;
   T softBackboneFluidTorqueScale = 0;
+  T softBackboneFluidTorqueFilterTime = 0;
+  T softBackboneAddedMassFrac = 0;
   T softBackboneMaxAngleStep = 0;
+  int softBackboneCouplingIterations = 1;
+  T softBackboneCouplingRelaxation = 1;
+  T softBackboneCouplingTolerance = 0;
+  SoftBackboneLoadProjection softBackboneLoadProjection =
+    SoftBackboneLoadProjection::SegmentCentroid;
   T meanSoftFluidTorqueNm = 0;
   T maxSoftFluidTorqueNm = 0;
   T meanSoftAngleStep = 0;
   T maxSoftAngleStep = 0;
+  T meanSoftCouplingResidual = 0;
+  T maxSoftCouplingResidual = 0;
+  T meanSoftCouplingItersUsed = 0;
+  T maxSoftCouplingItersUsed = 0;
+  T meanSoftElasticEnergyJ = 0;
+  T maxSoftElasticEnergyJ = 0;
+  T meanSoftDampingPowerW = 0;
+  T meanSoftActuatorPowerProxyW = 0;
+  T meanAbsSoftActuatorPowerProxyW = 0;
+  T maxAbsSoftActuatorPowerProxyW = 0;
+  T meanSoftAppliedFluidPowerW = 0;
+  T meanAbsSoftAppliedFluidPowerW = 0;
+  T maxAbsSoftAppliedFluidPowerW = 0;
+  T softBodyMassKg = 0;
+  T meanUPhysicalMps = 0;
+  T cotSoftActuatorProxySI = 0;
+};
+
+struct HistoryFrameSample {
+  T t = 0;
+  T Vx = 0;
+  T Vy = 0;
+  T omegaZ = 0;
+  T Fx = 0;
+  T Fy = 0;
+  T Tz = 0;
+  T xCm = 0;
+  T yCm = 0;
+  T theta = 0;
+  T power = 0;
+  T eta = 0;
+  T Uswim = 0;
+  T Ulateral = 0;
+  T forwardNetForce = 0;
+  T Flat = 0;
+  T Re = 0;
+  T St = 0;
+  T Mach = 0;
+  T Ustar = 0;
+  T meanSlip = 0;
+  T maxSlip = 0;
+  T meanMarkerForce = 0;
+  T maxMarkerForce = 0;
+  T normalizedSlip = 0;
+  T powerRigid = 0;
+  T powerDef = 0;
+  T meanResidualSlip = 0;
+  T maxResidualSlip = 0;
+  T meanSoftFluidTorqueNm = 0;
+  T maxSoftFluidTorqueNm = 0;
+  T meanSoftAngleStep = 0;
+  T maxSoftAngleStep = 0;
+  T softCouplingResidual = 0;
+  T maxSoftCouplingResidual = 0;
+  T softCouplingItersUsed = 0;
+  T maxSoftCouplingItersUsed = 0;
+  T softElasticEnergyJ = 0;
+  T maxSoftElasticEnergyJ = 0;
+  T softDampingPowerW = 0;
+  T softActuatorPowerProxyW = 0;
+  T absSoftActuatorPowerProxyW = 0;
+  T maxAbsSoftActuatorPowerProxyW = 0;
+  T softAppliedFluidPowerW = 0;
+  T absSoftAppliedFluidPowerW = 0;
+  T maxAbsSoftAppliedFluidPowerW = 0;
 };
 
 struct HistoryCsvData {
@@ -122,6 +217,49 @@ struct HistoryCsvData {
   const std::vector<T>* histMaxSoftFluidTorqueNm = nullptr;
   const std::vector<T>* histMeanSoftAngleStep = nullptr;
   const std::vector<T>* histMaxSoftAngleStep = nullptr;
+  const std::vector<T>* histSoftCouplingResidual = nullptr;
+  const std::vector<T>* histMaxSoftCouplingResidual = nullptr;
+  const std::vector<T>* histSoftCouplingItersUsed = nullptr;
+  const std::vector<T>* histMaxSoftCouplingItersUsed = nullptr;
+  const std::vector<T>* histSoftElasticEnergyJ = nullptr;
+  const std::vector<T>* histMaxSoftElasticEnergyJ = nullptr;
+  const std::vector<T>* histSoftDampingPowerW = nullptr;
+  const std::vector<T>* histSoftActuatorPowerProxyW = nullptr;
+  const std::vector<T>* histAbsSoftActuatorPowerProxyW = nullptr;
+  const std::vector<T>* histMaxAbsSoftActuatorPowerProxyW = nullptr;
+  const std::vector<T>* histSoftAppliedFluidPowerW = nullptr;
+  const std::vector<T>* histAbsSoftAppliedFluidPowerW = nullptr;
+  const std::vector<T>* histMaxAbsSoftAppliedFluidPowerW = nullptr;
+};
+
+struct SimulationHistory {
+  std::vector<T> histT, histVx, histVy, histWz;
+  std::vector<T> histFx, histFy, histTz;
+  std::vector<T> histXcm, histYcm, histTheta;
+  std::vector<T> histPower, histEta;
+  std::vector<T> histPowerRigid, histPowerDef;
+  std::vector<T> histMeanResidualSlip, histMaxResidualSlip;
+  std::vector<T> histMeanSoftFluidTorqueNm, histMaxSoftFluidTorqueNm;
+  std::vector<T> histMeanSoftAngleStep, histMaxSoftAngleStep;
+  std::vector<T> histSoftCouplingResidual, histMaxSoftCouplingResidual;
+  std::vector<T> histSoftCouplingItersUsed, histMaxSoftCouplingItersUsed;
+  std::vector<T> histSoftElasticEnergyJ, histMaxSoftElasticEnergyJ;
+  std::vector<T> histSoftDampingPowerW;
+  std::vector<T> histSoftActuatorPowerProxyW;
+  std::vector<T> histAbsSoftActuatorPowerProxyW;
+  std::vector<T> histMaxAbsSoftActuatorPowerProxyW;
+  std::vector<T> histSoftAppliedFluidPowerW;
+  std::vector<T> histAbsSoftAppliedFluidPowerW;
+  std::vector<T> histMaxAbsSoftAppliedFluidPowerW;
+  std::vector<T> histUswim, histUlat;
+  std::vector<T> histForwardNetForce, histFlat;
+  std::vector<T> histRe, histSt, histMach, histUstar;
+  std::vector<T> histMeanSlip, histMaxSlip;
+  std::vector<T> histMeanMarkerForce, histMaxMarkerForce;
+  std::vector<T> histNormalizedSlip;
+
+  void append(const HistoryFrameSample& sample);
+  HistoryCsvData csvData() const;
 };
 
 CsvPathResolution resolveCsvPath(const std::string& requestedPath,

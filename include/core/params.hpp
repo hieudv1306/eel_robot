@@ -7,7 +7,6 @@ struct EelParams {
   int    nx           = 2600;
   int    ny           = 400;
   T      initialPositionFactor = 0.85;
-  T      inflowVelocity = 0.02;
   T      tau          = 0.55;
 
   T      bodyRadius   = 6.0;
@@ -30,8 +29,6 @@ struct EelParams {
   int    substeps     = 80;
   T      Ttotal       = 15.0;
 
-  int    nIbmIters    = 1;
-  int    markerInterval = 1;
   T      warnMeanSlip    = 0.005;
   T      warnMaxSlip     = 0.02;
   T      warnMarkerForce = 0.10;

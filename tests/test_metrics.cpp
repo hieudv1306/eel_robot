@@ -37,4 +37,32 @@ int main() {
   assert(std::abs(s.meanAbsDeformationPower - 4.5) < 1e-12);
   assert(std::abs(s.meanResidualSlip - 0.0025) < 1e-12);
   assert(std::abs(s.maxResidualSlip - 0.006) < 1e-12);
+
+  std::vector<CycleAverage> cycles(5);
+  for (auto& c : cycles) {
+    c.Uswim = 0.1;
+    c.Ustar = 0.1;
+    c.CoT = 10.0;
+    c.hydroCost = 10.0;
+    c.normalizedSlip = 0.1;
+  }
+  auto cc = computeCycleConvergence(cycles);
+  assert(cc.cycleConverged);
+  assert(std::abs(cc.cycleMeanUswim - 0.1) < 1e-12);
+  assert(std::abs(cc.cycleCvUswim) < 1e-12);
+
+  for (auto& c : cycles) {
+    c.Uswim = -0.1;
+  }
+  cc = computeCycleConvergence(cycles);
+  assert(!cc.cycleConverged);
+  assert(cc.cycleMeanUswim < 0.0);
+
+  const T driftingUswim[] = {0.10, 0.08, 0.06, 0.04, 0.02};
+  for (size_t i = 0; i < cycles.size(); ++i) {
+    cycles[i].Uswim = driftingUswim[i];
+  }
+  cc = computeCycleConvergence(cycles);
+  assert(!cc.cycleConverged);
+  assert(cc.cycleCvUswim > 0.05);
 }

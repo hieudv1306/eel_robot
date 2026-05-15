@@ -153,6 +153,16 @@ int main() {
   assert(loaded.latticeTorqueToNm > 0.0);
   assert(loaded.maxAbsSegmentTorqueNm > 0.0);
 
+  auto virtualLoad = projectMarkerForcesToSoftBackbone(
+    pInext, backbone, preferred, 100.0, 60.0, 0.0, markers,
+    SoftBackboneLoadProjection::CrossSectionVirtualWork);
+  assert(virtualLoad.segmentTorqueNm.size() ==
+         static_cast<size_t>(backbone.nSegments));
+  assert(virtualLoad.latticeTorqueToNm > 0.0);
+  assert(virtualLoad.maxAbsSegmentTorqueNm > 0.0);
+  assert(std::abs(virtualLoad.maxAbsSegmentTorqueNm -
+                  loaded.maxAbsSegmentTorqueNm) > 1e-18);
+
   // ----- Soft transitional path matches legacy prescribed-wave -----
   // When --bodyKinematics=soft_backbone --softBackboneDynamics=false the
   // backbone state is the analytical preferred wave, so the IBM markers

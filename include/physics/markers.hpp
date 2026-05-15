@@ -54,4 +54,6 @@ SoftBackboneForceProjection projectMarkerForcesToSoftBackbone(
     const SoftBackboneConfig& config,
     const SoftBackboneState& state,
     T xCm, T yCm, T theta,
-    const LagrangianMarkers& markers);
+    const LagrangianMarkers& markers,
+    SoftBackboneLoadProjection projection =
+      SoftBackboneLoadProjection::SegmentCentroid);

@@ -115,15 +115,21 @@ int main() {
   }
   assert(maxRestDrift < 1e-12);
 
-  // (b) With non-trivial preferred and zero fluid, segment 0 must be pinned
-  //     exactly to preferred at every step.
+  // (b) With non-trivial preferred and zero fluid, the rigid-rotation mode
+  //     is removed by matching the mean segment angle/rate to preferred.
   SoftBackboneState implicitFromStraight = straight;
   advanceSoftBackboneImplicit(config, preferredState, zeroFluidVec,
                               1e-4, implicitParams, implicitFromStraight);
-  assert(std::abs(implicitFromStraight.theta.front() -
-                  preferredState.theta.front()) < 1e-12);
-  assert(std::abs(implicitFromStraight.omega.front() -
-                  preferredState.omega.front()) < 1e-12);
+  T meanThetaError = 0.0;
+  T meanOmegaError = 0.0;
+  for (int i = 0; i < config.nSegments; ++i) {
+    meanThetaError += implicitFromStraight.theta[i] - preferredState.theta[i];
+    meanOmegaError += implicitFromStraight.omega[i] - preferredState.omega[i];
+  }
+  meanThetaError /= T(config.nSegments);
+  meanOmegaError /= T(config.nSegments);
+  assert(std::abs(meanThetaError) < 1e-12);
+  assert(std::abs(meanOmegaError) < 1e-12);
 
   // (c) Inertia / phase-lag check: relax a perturbation at zero preferred
   //     with no fluid load — energy must not grow over a short integration
@@ -131,15 +137,24 @@ int main() {
   SoftBackboneState perturbed = restingPreferredState;
   perturbed.theta[config.nSegments / 2] = 0.05;  // small bend
   T initialMaxAbs = 0.05;
+  const T initialElasticEnergy =
+    computeSoftBackboneTorques(config, perturbed, zeroPreferred).elasticEnergyJ;
+  SoftBackboneDynamicsDiagnostics relaxDiag;
   for (int s = 0; s < 50; ++s) {
-    advanceSoftBackboneImplicit(config, restingPreferredState, zeroFluidVec,
-                                1e-4, implicitParams, perturbed);
+    relaxDiag =
+      advanceSoftBackboneImplicit(config, restingPreferredState, zeroFluidVec,
+                                  1e-4, implicitParams, perturbed);
   }
   T finalMaxAbs = 0.0;
   for (T th : perturbed.theta) {
     finalMaxAbs = std::max(finalMaxAbs, std::abs(th));
   }
+  const T finalElasticEnergy =
+    computeSoftBackboneTorques(config, perturbed, zeroPreferred).elasticEnergyJ;
   assert(finalMaxAbs <= initialMaxAbs + 1e-9);
+  assert(finalElasticEnergy <= initialElasticEnergy + 1e-12);
+  assert(relaxDiag.elasticEnergyJ >= 0.0);
+  assert(relaxDiag.dampingPowerW >= 0.0);
 
   // (d) Fluid torque actually drives joint angle changes when scale > 0.
   SoftBackboneState forced = preferredState;
@@ -153,4 +168,41 @@ int main() {
                                 1e-4, forcedParams, forced);
   assert(forcedDiag.maxAbsFluidSegmentTorqueNm > 0.0);
   assert(forcedDiag.maxAbsAngleStep > 0.0);
+  assert(forcedDiag.elasticEnergyJ >= 0.0);
+  assert(forcedDiag.dampingPowerW >= 0.0);
+  assert(forcedDiag.absAppliedFluidPowerW > 0.0);
+  assert(forcedDiag.maxAbsJointMomentNm >= 0.0);
+
+  // (e) Spatially affine fluid torque is a reduced-model rigid/yaw load, not
+  //     an internal bending load.  The soft solver removes it before applying
+  //     the remaining self-equilibrated torque to the backbone.
+  SoftBackboneState uniformTorqueState = restingPreferredState;
+  std::vector<T> uniformFluidLoad(config.nSegments, 0.001);
+  advanceSoftBackboneImplicit(config, restingPreferredState, uniformFluidLoad,
+                              1e-4, forcedParams, uniformTorqueState);
+  T maxUniformJointAngle = 0.0;
+  for (int j = 0; j < config.nSegments - 1; ++j) {
+    maxUniformJointAngle =
+      std::max(maxUniformJointAngle,
+               std::abs(uniformTorqueState.theta[j + 1] -
+                        uniformTorqueState.theta[j]));
+  }
+  assert(maxUniformJointAngle < 1e-12);
+
+  SoftBackboneState affineTorqueState = restingPreferredState;
+  std::vector<T> affineFluidLoad(config.nSegments, 0.0);
+  for (int i = 0; i < config.nSegments; ++i) {
+    const T x = T(2) * T(i) / T(config.nSegments - 1) - T(1);
+    affineFluidLoad[i] = T(0.001) + T(0.0005) * x;
+  }
+  advanceSoftBackboneImplicit(config, restingPreferredState, affineFluidLoad,
+                              1e-4, forcedParams, affineTorqueState);
+  T maxAffineJointAngle = 0.0;
+  for (int j = 0; j < config.nSegments - 1; ++j) {
+    maxAffineJointAngle =
+      std::max(maxAffineJointAngle,
+               std::abs(affineTorqueState.theta[j + 1] -
+                        affineTorqueState.theta[j]));
+  }
+  assert(maxAffineJointAngle < 1e-12);
 }

@@ -43,6 +43,7 @@ TEST_DIR := tmp/test_bins
 TEST_CXXFLAGS := $(CXXFLAGS) -Iinclude
 TEST_HEADERS := $(wildcard include/core/*.hpp include/physics/*.hpp)
 TEST_BINS := \
+	$(TEST_DIR)/test_cli \
 	$(TEST_DIR)/test_gait \
 	$(TEST_DIR)/test_material \
 	$(TEST_DIR)/test_metrics \
@@ -70,8 +71,24 @@ onlysample: $(EXAMPLE)
 run: $(EXAMPLE)
 	./$(EXAMPLE)
 
+.PHONY: smoke
+smoke: $(EXAMPLE)
+	./$(EXAMPLE) --nx=320 --ny=120 --useAspectRatioGeometry=false \
+		--bodyRadius=3 --eelScale=40 --nSpine=80 --Ttotal=0.08 \
+		--substeps=2 --nWarmup=0 --tCut=0 --studyMode=verification \
+		--mode=preview --runTag=smoke \
+		--summaryCsv=tmp/smoke_ar.csv \
+		--sensitivityCsv=tmp/smoke_sensitivity.csv
+
+.PHONY: visual
+visual: $(EXAMPLE)
+	python3 scripts/run_visualization_case.py
+
 $(TEST_DIR):
 	mkdir -p $@
+
+$(TEST_DIR)/test_cli: tests/test_cli.cpp src/io/cli.cpp src/core/params.cpp $(TEST_HEADERS) include/io/cli.hpp | $(TEST_DIR)
+	$(CXX) $(TEST_CXXFLAGS) -o $@ $(filter %.cpp,$^)
 
 $(TEST_DIR)/test_gait: tests/test_gait.cpp src/physics/gait.cpp $(TEST_HEADERS) | $(TEST_DIR)
 	$(CXX) $(TEST_CXXFLAGS) -o $@ $(filter %.cpp,$^)

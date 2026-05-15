@@ -128,3 +128,26 @@ inline const char* bodyMaterialName(BodyMaterial m) {
   return (m == BodyMaterial::DragonSkin20)
        ? "dragon_skin_20" : "neutral_lattice";
 }
+
+// Projection used to convert IBM marker reactions to soft-backbone segment
+// torque loads.
+enum class SoftBackboneLoadProjection {
+  SegmentCentroid,
+  CrossSectionVirtualWork
+};
+
+inline SoftBackboneLoadProjection parseSoftBackboneLoadProjection(
+    const std::string& s) {
+  if (s == "virtual_work" || s == "virtualWork" ||
+      s == "cross_section" || s == "crossSection" ||
+      s == "cross_section_virtual_work") {
+    return SoftBackboneLoadProjection::CrossSectionVirtualWork;
+  }
+  return SoftBackboneLoadProjection::SegmentCentroid;
+}
+
+inline const char* softBackboneLoadProjectionName(
+    SoftBackboneLoadProjection p) {
+  return (p == SoftBackboneLoadProjection::CrossSectionVirtualWork)
+       ? "cross_section_virtual_work" : "segment_centroid";
+}

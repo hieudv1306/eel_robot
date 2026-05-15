@@ -71,6 +71,8 @@ struct CycleAverage {
 
 struct CycleConvergence {
   int nSteadyCycles = 0;
+  T cycleMeanUswim = 0.0;
+  T cycleCvUswim = 0.0;
   T cycleMeanUstar = 0.0;
   T cycleCvUstar = 0.0;
   T cycleMeanCoT = 0.0;

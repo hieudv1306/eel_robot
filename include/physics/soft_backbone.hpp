@@ -60,7 +60,6 @@ struct SoftBackboneCenterline {
 };
 
 struct SoftBackboneDynamicsParams {
-  T relaxationTime = 0.05;
   T fluidTorqueScale = 1.0;
   T maxAngleStep = 0.02;
 };
@@ -70,6 +69,20 @@ struct SoftBackboneDynamicsDiagnostics {
   T maxAbsTargetCurvatureOffset = 0.0;
   T maxAbsAngleStep = 0.0;
   T maxAbsAngleErrorRad = 0.0;
+  T elasticEnergyJ = 0.0;
+  T dampingPowerW = 0.0;
+  // Signed proxy for work needed to move the preferred/rest joint angles
+  // against the current spring-damper load.  Positive values mean the
+  // prescribed soft backbone is doing work on the elastic model under this
+  // sign convention; use absActuatorPowerProxyW for ranking.
+  T actuatorPowerProxyW = 0.0;
+  T absActuatorPowerProxyW = 0.0;
+  // Power from the scaled fluid torque that is actually applied to the
+  // backbone dynamics.  The raw fluid torque magnitude is still reported by
+  // maxAbsFluidSegmentTorqueNm.
+  T appliedFluidPowerW = 0.0;
+  T absAppliedFluidPowerW = 0.0;
+  T maxAbsJointMomentNm = 0.0;
 };
 
 SoftBackboneConfig makeSoftBackboneConfig(
@@ -129,11 +142,12 @@ SoftBackboneState extrapolateBackboneState(
 
 // Implicit Euler advance of segment angles with proper inertia, joint
 // stiffness K_theta = EI/ds, and joint damping C_theta from the material
-// damping ratio.  Pins segment 0 to the preferred state to remove the
-// rigid-rotation null space (the rigid-body theta absorbs net rotation).
-// The system is tridiagonal in (N-1) interior segment angular velocities
-// and is solved with Thomas elimination, so cost is O(N) per step and the
-// scheme is unconditionally stable for stiff K_theta.
+// damping ratio.  The rod is solved with free-end internal torques and the
+// rigid-rotation mode is removed by matching the mean angle/rate to the
+// preferred state (the rigid-body theta absorbs net rotation).  The system is
+// tridiagonal in N segment angular velocities and is solved with Thomas
+// elimination, so cost is O(N) per step and the scheme is unconditionally
+// stable for stiff K_theta.
 SoftBackboneDynamicsDiagnostics advanceSoftBackboneImplicit(
     const SoftBackboneConfig& config,
     const SoftBackboneState& preferred,

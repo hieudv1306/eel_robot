@@ -117,7 +117,8 @@ SoftBackboneForceProjection projectMarkerForcesToSoftBackbone(
     const SoftBackboneConfig& config,
     const SoftBackboneState& state,
     T xCm, T yCm, T theta,
-    const LagrangianMarkers& markers)
+    const LagrangianMarkers& markers,
+    SoftBackboneLoadProjection projection)
 {
   SoftBackboneForceProjection out;
   if (!config.valid || config.nSegments <= 0 || markers.size() <= 0) {
@@ -151,6 +152,8 @@ SoftBackboneForceProjection projectMarkerForcesToSoftBackbone(
     const T xm = markers.x[m];
     const T ym = markers.y[m];
     int bestSegment = 0;
+    T bestProjX = centerline.segmentX[0];
+    T bestProjY = centerline.segmentY[0];
     T bestDist2 = std::numeric_limits<T>::max();
     for (int s = 0; s < nSegments; ++s) {
       const T ax = centerline.nodeX[s];
@@ -173,6 +176,8 @@ SoftBackboneForceProjection projectMarkerForcesToSoftBackbone(
       if (dist2 < bestDist2) {
         bestDist2 = dist2;
         bestSegment = s;
+        bestProjX = px;
+        bestProjY = py;
       }
     }
 
@@ -182,8 +187,20 @@ SoftBackboneForceProjection projectMarkerForcesToSoftBackbone(
     const T bodyFyLat = -markers.fy[m] * markers.ds[m];
     out.netForceXLat += bodyFxLat;
     out.netForceYLat += bodyFyLat;
-    const T rx = xm - centerline.segmentX[bestSegment];
-    const T ry = ym - centerline.segmentY[bestSegment];
+
+    // segment_centroid is the legacy projection: the marker reaction becomes
+    // a torque about the nearest segment centroid.  cross_section_virtual_work
+    // uses the closest point on the backbone centerline as the virtual-work
+    // pivot, which suppresses spurious torque from translating the whole
+    // segment while retaining the local force couple across the body width.
+    const bool crossSectionProjection =
+      projection == SoftBackboneLoadProjection::CrossSectionVirtualWork;
+    const T pivotX = crossSectionProjection
+                   ? bestProjX : centerline.segmentX[bestSegment];
+    const T pivotY = crossSectionProjection
+                   ? bestProjY : centerline.segmentY[bestSegment];
+    const T rx = xm - pivotX;
+    const T ry = ym - pivotY;
     const T torqueLat = rx * bodyFyLat - ry * bodyFxLat;
     segmentTorqueLat[bestSegment] += torqueLat;
     out.netTorqueLat += torqueLat;
