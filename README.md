@@ -15,6 +15,12 @@ Run the pure-C++ regression checks:
 make test
 ```
 
+Run the short executable smoke used by the README command below:
+
+```sh
+make smoke
+```
+
 ## Verification Smoke
 
 ```sh
@@ -26,9 +32,36 @@ make test
   --sensitivityCsv=tmp/smoke_sensitivity.csv
 ```
 
+The CLI validates known options and value ranges before OpenLB setup starts.
+Retired compatibility inputs such as `--inflowU`, `--nIbmIters`, and
+`--softBackboneRelaxationTime` are reported as warnings instead of being
+silently treated as active solver controls.
+
+`--bodyKinematics` defaults to `soft_backbone` (markers built through the
+soft-backbone state).  Pass `--bodyKinematics=prescribed_wave` only when you
+need the rigid analytical-kinematics baseline for compliance vs. CoT
+comparisons or as a kinematics-only diagnostic.
+
 ## Output Selection
 
-Spatial outputs can be selected independently.  For full-cadence ParaView
+Runs are CSV-only by default.  This keeps aspect-ratio optimization sweeps from
+writing large VTK/body snapshot trees unless visualization is explicitly
+requested.
+
+Use the visualization preset when ParaView output is needed.  It runs the
+current AR16 soft-body baseline with full-cadence vorticity and body files:
+
+```sh
+python3 scripts/run_visualization_case.py
+```
+
+The same preset is also available as:
+
+```sh
+make visual
+```
+
+Spatial outputs can still be selected manually.  For full-cadence ParaView
 output with only vorticity and body files:
 
 ```sh
@@ -44,26 +77,82 @@ Use the sweep helper for light, CSV-only verification runs.  It passes
 solver physics and update order stay unchanged.
 
 ```sh
-python3 scripts/run_ar_sweep.py --aspect-ratio 7 9 11 \
-  --nx=600 --ny=180 --ttotal=12 --substeps=40 \
-  --body-area=1078.5398163397449 --tag-prefix=soft_ar \
-  -- --case=surge_only --wallBoundary=freeslip \
-  --bodyKinematics=soft_backbone \
-  --waveDirection=tail_to_head \
-  --softBackboneDynamics=true \
-  --softBackboneFluidTorqueScale=0.01 \
-  --softBackboneAddedMassFrac=1 \
-  --softBackboneMaxAngleStep=0.5 \
-  --ibmIterations=2 --tCut=4
+python3 scripts/run_ar_sweep.py \
+  --aspect-ratio 14 15 16 17 18 \
+  --tag-prefix=kinematic_prod_ar_v21
 ```
 
-The `(scale=0.01, frac=1)` combination is the verified-stable starting
-point after the Issue 1 trapezoidal-centerline fix; see "Stability and
-added mass" below for the previous (now-stale) higher-scale recipe.
+Rank the completed sweep after filtering out invalid or non-converged rows:
 
-Rank shape runs primarily by `CoT`, `hydroCost`, `transportEfficiencyDef`,
-and `meanUstar`.  Treat `etaNetForceDiagnostic` as a consistency diagnostic,
-not a propulsion-efficiency metric.
+```sh
+python3 scripts/rank_shape_sweep.py \
+  --csv tmp/ar_sweep_sensitivity_metrics_v21.csv \
+  --output-md tmp/ar_sweep_rank.md \
+  --objective cotDef
+```
+
+`run_ar_sweep.py` fixes the optimization baseline by default:
+`nx=2600`, `ny=400`, `Ttotal=24`, `tCut=8`, `wallBoundary=freeslip`,
+`waveDirection=head_to_tail`, `substeps=80`,
+`ibmIterations=2`, `softBackboneFluidTorqueScale=0.001`,
+`softBackboneFluidTorqueFilterTime=0`,
+`softBackboneAddedMassFrac=1`, and `softBackboneCouplingIterations=6`.
+Override those only for later staged sweeps.  For the first geometry pass,
+keep the soft-fluid torque scale conservative and treat higher scales as a
+later physics-strength sweep.  See "Stability and added mass" below for the
+previous now-stale recipe.
+
+Rank shape runs primarily by `cotDef`/`CoT`, `hydroCost`,
+`transportEfficiencyDef`, and `meanUstar`.  Treat
+`etaNetForceDiagnostic` as a consistency diagnostic, not a
+propulsion-efficiency metric.  The v21 CSV schema also records
+`cycleMeanUswim`, `cycleCvUswim`, soft elastic/damping/actuator-power proxy
+diagnostics, `meanUPhysicalMps`, `cotSoftActuatorProxySI`, and
+`materialDampingRatio`; strict ranking
+rejects rows where the last cycles have settled into backward swimming even if
+the unsigned speed `Ustar` looks converged.
+
+For optimization, keep the sweep staged so only one class of variable changes
+at a time:
+
+1. Geometry stage: sweep `aspectRatio` only.  Hold area, material, gait,
+   wall boundary, IBM iterations, soft coupling, and torque scale fixed.
+2. Stability stage: for the winning AR band only, sweep
+   `softBackboneFluidTorqueFilterTime`, `softBackboneAddedMassFrac`, coupling
+   iterations, and substeps until residuals stay below threshold without
+   changing the physical objective.
+3. Physics-strength stage: sweep `softBackboneFluidTorqueScale` only after the
+   AR band and stable numerical settings are fixed.
+
+Do not compare AR values from runs that also changed `softBackboneFluidTorqueScale`,
+`softBackboneFluidTorqueFilterTime`, `softBackboneAddedMassFrac`, `substeps`,
+or `ibmIterations`; those are separate axes and will mask the geometry effect.
+`rank_shape_sweep.py` reports those control-field changes in the generated
+markdown so mixed sweeps are easy to catch before interpreting the ranking.
+
+## Geometry Convention
+
+The optimization target uses the 2D capsule seen by the LBM solver.  The
+aspect ratio is
+
+```text
+AR = totalGeometricLengthLU / bodyWidthLU
+   = (centerlineLengthLU + 2*bodyRadius) / (2*bodyRadius)
+```
+
+For production shape sweeps, keep `--useAspectRatioGeometry=true` and hold
+`--bodyAreaTarget=1078.5398163397449` fixed while sweeping only
+`--aspectRatio`.  This preserves the projected 2D capsule area and therefore
+keeps the 2D mass/inertia constraint comparable across AR values.  The solver
+then computes `bodyRadius` and `eelScale` from the requested AR and area.
+
+The physical soft-rod scale is a separate constraint.  Keep
+`--physicalBodyLengthM=0.30`, `--bodyThicknessM=0.02`, and
+`--material=dragon_skin_20` fixed during the first geometry sweep.  The rod
+width is inferred from the 2D capsule width relative to total body length, so
+changing AR changes the effective rod width while the real length, thickness,
+and material stay fixed.  Only change those physical-section parameters in a
+separate sweep after the AR trend is established.
 
 ## Material / Soft-Rod Foundation
 
@@ -80,33 +169,41 @@ Override the physical dimensions when the real robot size differs:
 ./11_lbm_eel_3dof --physicalBodyLengthM=0.30 --bodyThicknessM=0.012
 ```
 
-The current fluid coupling still uses prescribed body kinematics; the material
-and rod-section code is the first step toward replacing the prescribed gait
-with a soft backbone driven by preferred curvature.
+The marker geometry now routes through the soft-backbone state by default.
+With `--softBackboneDynamics=false`, the backbone follows the preferred
+curvature wave.  With `--softBackboneDynamics=true`, IBM surface reactions are
+projected back to the backbone and advanced with the implicit soft-rod
+integrator.
 
-The next foundation piece is now present in `physics/soft_backbone`: it builds
-a planar inextensible backbone model from the Dragon Skin 20 rod estimate,
-computes preferred-curvature waves, and reports internal elastic/damping
-moments.  This module is intentionally independent of OpenLB so it can be
-validated with dry rod tests before the IBM marker geometry is driven by the
-soft-body state.
-
-Use `--bodyKinematics=soft_backbone` to route IBM marker geometry through the
-soft-backbone state instead of the legacy direct prescribed-wave marker path:
+`--bodyKinematics=soft_backbone` is the default.  IBM marker geometry is
+routed through the soft-backbone state rather than the legacy analytical
+prescribed-wave path:
 
 ```sh
-./11_lbm_eel_3dof --case=surge_only --bodyKinematics=soft_backbone \
-  --material=dragon_skin_20
+./11_lbm_eel_3dof --case=surge_only --material=dragon_skin_20
 ```
 
-This is a transitional coupling mode: the marker geometry comes from the
-backbone state and Dragon Skin 20 stiffness diagnostics, while the default
-backbone state still follows the preferred-curvature wave.
+In this transitional coupling mode the marker geometry comes from the
+backbone state and Dragon Skin 20 stiffness diagnostics; the backbone state
+itself still follows the preferred-curvature wave unless
+`--softBackboneDynamics=true` is set.  Use `--bodyKinematics=prescribed_wave`
+only as a rigid baseline (e.g. to isolate kinematics from FSI dynamics, or to
+quantify how much compliance changes CoT against an identical prescribed
+gait).
 
-Use `--waveDirection=head_to_tail` for the legacy travelling wave and
-`--waveDirection=tail_to_head` to reverse the actuation wave without changing
-the body-forward convention.  With the current body frame, forward swimming at
-`theta=0` points toward negative x.
+With the current body frame, the head sits at the most-negative `x` and
+forward swimming at `theta=0` points toward negative `x`.  Use
+`--waveDirection=head_to_tail` for forward production runs at AR≥9 — the
+travelling wave moves head-to-tail in the body frame and the eel propels
+head-first, reproducing natural anguilliform kinematics.
+
+`--waveDirection=tail_to_head` is a sign-reversed sanity check, not a
+production setting.  At very small AR (~7-8, Re≈30) the small-amplitude
+quasi-Stokes regime can flip the sign of the propulsion (a few `1e-3`
+LU/step), but at AR≥9 — including every soft-body production case —
+`tail_to_head` drives the body backward.  An earlier README claimed the
+opposite; that note was inferred from AR=7.7 smoke tests and does **not**
+hold at production scales.
 
 An experimental fluid-loaded backbone update can be enabled with
 `--softBackboneDynamics=true`.  It projects IBM surface reactions to backbone
@@ -120,16 +217,69 @@ respect to the gait.  Segment 0 is pinned to the preferred state to remove
 the rigid-rotation null space.
 
 ```sh
-./11_lbm_eel_3dof --bodyKinematics=soft_backbone \
+./11_lbm_eel_3dof --waveDirection=head_to_tail \
   --softBackboneDynamics=true \
+  --softBackboneCouplingIterations=3 \
+  --softBackboneCouplingRelaxation=0.7 \
+  --softBackboneCouplingTolerance=1e-4 \
+  --softBackboneLoadProjection=cross_section_virtual_work \
   --softBackboneFluidTorqueScale=0.01 \
   --softBackboneAddedMassFrac=1 \
   --softBackboneMaxAngleStep=0.5
 ```
 
+`--softBackboneCouplingIterations=1` preserves the original lagged
+partitioned update.  Values above 1 set the maximum number of fixed-point
+IBM/backbone sub-iterations before the single fluid `collideAndStream()`;
+`--softBackboneCouplingTolerance` stops those iterations early once the
+backbone state residual is below the requested radian tolerance.  Set the
+tolerance to `0` to force the exact fixed iteration count.  The
+`cross_section_virtual_work` projection converts marker reactions to segment
+torques about the closest centerline cross-section; use
+`segment_centroid` to recover the legacy projection.
+
 The history and summary CSVs include the coupling settings plus
 `meanSoftFluidTorqueNm`, `maxSoftFluidTorqueNm`, `meanSoftAngleStep`, and
-`maxSoftAngleStep` for post-run checks.
+`maxSoftAngleStep`, along with `softCouplingResidual` and
+`softCouplingItersUsed` diagnostics for post-run checks.
+
+Build a stability map before production soft-body sweeps:
+
+```sh
+python3 scripts/run_soft_stability_map.py \
+  --scales 0.001 0.003 0.005 0.01 \
+  --added-mass-frac 1 5 10 25 \
+  --coupling-iters 4 6 8 \
+  --coupling-tolerance 1e-4 \
+  --aspect-ratio 16 \
+  --body-area-target 1078.5398163397449 \
+  --wave-direction head_to_tail \
+  --wall-boundary freeslip \
+  --substeps 80 \
+  --ttotal 2
+```
+
+The script defaults to production aspect-ratio geometry
+(`--useAspectRatioGeometry=true`), `freeslip` walls, `head_to_tail` actuation,
+`substeps=80`, and `ibmIterations=2`.  It runs verification cases, keeps one
+log per case under
+`tmp/soft_stability_raw/`, writes the full classification table to
+`tmp/soft_stability_map_v21.csv`, and writes the smallest stable
+`softBackboneAddedMassFrac` per torque scale to
+`tmp/soft_stability_map_v21.md`.  Cases are marked `stable`, `marginal`, or
+`unstable` using abort status, slip, angle-step saturation, coupling residual,
+and whether the adaptive coupling stayed pinned to the maximum iteration
+count.
+
+**Note: the old stability table below is STALE.**  Both the table and the
+underlying smokes in `tmp/soft_stability_raw/` were calibrated with
+`--waveDirection=tail_to_head`, which drives the body backward at the
+calibration AR.  The forward-swimming regime under `head_to_tail` produces
+larger IBM forces (the body actually translates instead of churning in
+place), so the partitioned-FSI added-mass instability boundary will move
+toward larger required `--softBackboneAddedMassFrac` at the same scale.
+Re-run the script with `--wave-direction head_to_tail` before any new
+production soft-body sweep, and discard the table values below.
 
 Stability and added mass: even with the implicit Newton-Euler backbone
 integrator, the partitioned coupling between LBM (advances first) and the
@@ -141,10 +291,19 @@ fluid-torque scales and will diverge as the scale grows.
 
 `--softBackboneAddedMassFrac` lumps a fraction of the slender-body theoretical
 added rotational inertia into each segment to widen the stable operating
-window.  Stability map re-calibrated 2026-05-09 against the
+window.  The stability map below was calibrated 2026-05-09 against the
 post-Issue-1 trapezoidal centerline walk at the calibration grid
-(600x180, eelScale=60, bodyRadius=4, nSpine=100, substeps=20), via
-`Ttotal=2` smokes that brackets the smallest stable `frac` per scale:
+(600x180, eelScale=60, bodyRadius=4, nSpine=100, substeps=20), with the
+legacy one-pass `segment_centroid` projection and
+`--waveDirection=tail_to_head`, via `Ttotal=2` smokes that bracket the
+smallest stable `frac` per scale:
+
+`--softBackboneFluidTorqueFilterTime` applies a first-order filter to the
+fluid torque before it enters the implicit backbone update.  Use `0` to
+recover the unfiltered model.  Values on the order of a few LBM substeps can
+suppress IBM force jitter without changing the prescribed gait or geometry;
+do not use whole swimming-cycle time scales.  Keep it fixed when comparing
+aspect ratios.
 
 | `--softBackboneFluidTorqueScale` | min stable `--softBackboneAddedMassFrac` |
 |---|---|
@@ -154,14 +313,13 @@ post-Issue-1 trapezoidal centerline walk at the calibration grid
 | 0.1   | 25  (DIVERGE@20, STABLE@25) |
 | 1.0   | 400 (DIVERGE@300, STABLE@400) |
 
-Issue 1 fix shifted the boundary by ~2-2.5x at moderate scales (the
-trapezoidal node-tangent walk transmits a slightly larger phase-correct
-fluid torque to the backbone tail).  At scale=0.01 the run was further
-re-verified end-to-end over 8 s with post-`tCut=4` mean residual slip
-~0.0056 and `maxSoftAngleStep` well below the 0.5 limiter, which is
-the recommended starting point for production sweeps.  Pick `frac`
-slightly above the table to leave margin -- the 2 s smoke is a
-necessary, not sufficient, stability check for longer runs.
+The `tail_to_head` calibration above sweeps a body that is being driven
+backward (or barely moving), so the IBM coupling load is small.  Treat the
+table as a strict **lower bound** on the stable `frac` for production runs:
+a forward-swimming `head_to_tail` body produces larger surface reactions and
+will need a larger `frac` (or a smaller `scale`) at the same grid.  Re-run
+the stability map with `head_to_tail` before relying on these numbers for
+production sweeps.
 
 Pushing `frac` high enough to stabilise `scale=1` (>=400 here) leaves
 the backbone effectively rigid; for genuine full-coupling FSI a

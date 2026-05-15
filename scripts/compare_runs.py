@@ -10,8 +10,13 @@ DEFAULT_METRICS = [
     "meanAbsDeformationPower",
     "runtimeDomainClampCount",
     "cycleConverged",
+    "cycleMeanUswim",
+    "cycleCvUswim",
     "meanSlip",
     "meanResidualSlip",
+    "meanSoftElasticEnergyJ",
+    "meanAbsSoftActuatorPowerProxyW",
+    "cotSoftActuatorProxySI",
 ]
 
 
