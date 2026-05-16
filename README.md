@@ -271,32 +271,13 @@ log per case under
 and whether the adaptive coupling stayed pinned to the maximum iteration
 count.
 
-**Note: the old stability table below is STALE.**  Both the table and the
-underlying smokes in `tmp/soft_stability_raw/` were calibrated with
-`--waveDirection=tail_to_head`, which drives the body backward at the
-calibration AR.  The forward-swimming regime under `head_to_tail` produces
-larger IBM forces (the body actually translates instead of churning in
-place), so the partitioned-FSI added-mass instability boundary will move
-toward larger required `--softBackboneAddedMassFrac` at the same scale.
-Re-run the script with `--wave-direction head_to_tail` before any new
-production soft-body sweep, and discard the table values below.
-
 Stability and added mass: even with the implicit Newton-Euler backbone
 integrator, the partitioned coupling between LBM (advances first) and the
 backbone (lagged fluid load) is subject to the classical added-mass
 instability when the displaced fluid mass is comparable to the body mass --
-which is the case here for water + Dragon Skin 20.  The structural inertia
-alone leaves the scheme just inside the stability boundary at very low
-fluid-torque scales and will diverge as the scale grows.
-
-`--softBackboneAddedMassFrac` lumps a fraction of the slender-body theoretical
-added rotational inertia into each segment to widen the stable operating
-window.  The stability map below was calibrated 2026-05-09 against the
-post-Issue-1 trapezoidal centerline walk at the calibration grid
-(600x180, eelScale=60, bodyRadius=4, nSpine=100, substeps=20), with the
-legacy one-pass `segment_centroid` projection and
-`--waveDirection=tail_to_head`, via `Ttotal=2` smokes that bracket the
-smallest stable `frac` per scale:
+which is the case here for water + Dragon Skin 20.  `--softBackboneAddedMassFrac`
+lumps a fraction of the slender-body theoretical added rotational inertia
+into each segment to widen the stable operating window.
 
 `--softBackboneFluidTorqueFilterTime` applies a first-order filter to the
 fluid torque before it enters the implicit backbone update.  Use `0` to
@@ -305,21 +286,35 @@ suppress IBM force jitter without changing the prescribed gait or geometry;
 do not use whole swimming-cycle time scales.  Keep it fixed when comparing
 aspect ratios.
 
-| `--softBackboneFluidTorqueScale` | min stable `--softBackboneAddedMassFrac` |
-|---|---|
-| 0.001 | 1 (theoretical) |
-| 0.01  | 1 |
-| 0.05  | 10  (DIVERGE@7,  STABLE@10) |
-| 0.1   | 25  (DIVERGE@20, STABLE@25) |
-| 1.0   | 400 (DIVERGE@300, STABLE@400) |
+The 2026-05-16 stability map was re-calibrated under `--waveDirection=head_to_tail`
+(the forward-swimming direction at AR≥9) against the post-Issue-1 trapezoidal
+centerline walk and the `cross_section_virtual_work` load projection.  Grid:
+1000x240, AR=16, `bodyAreaTarget=1078.54`, nSpine=100, substeps=80,
+`ibmIterations=2`, `softBackboneCouplingRelaxation=0.7`,
+`softBackboneCouplingTolerance=1e-4`, `softBackboneFluidTorqueFilterTime=0`,
+`Ttotal=2`s smokes.  All 48 cases swam forward (`cycleMeanUswim≈+0.0027`)
+without aborting.
 
-The `tail_to_head` calibration above sweeps a body that is being driven
-backward (or barely moving), so the IBM coupling load is small.  Treat the
-table as a strict **lower bound** on the stable `frac` for production runs:
-a forward-swimming `head_to_tail` body produces larger surface reactions and
-will need a larger `frac` (or a smaller `scale`) at the same grid.  Re-run
-the stability map with `head_to_tail` before relying on these numbers for
-production sweeps.
+| `--softBackboneFluidTorqueScale` | min stable `--softBackboneAddedMassFrac` | required `--softBackboneCouplingIterations` |
+|---|---|---|
+| 0.001 | 1 | 6 |
+| 0.003 | 1 | 6 |
+| 0.005 | 1 | 6 |
+| 0.01  | 1 | 6 |
+
+Every `frac ∈ {1, 5, 10, 25}` was stable at the listed `couplingIterations`,
+so `frac=1` is the production floor at these scales.
+`couplingIterations=4` always classifies as marginal here — the fixed-point
+pins to its max iterations with `maxSoftCouplingResidual≈1.05e-4`, just over
+the configured `1e-4` tolerance.  `couplingIterations=8` is identical to 6
+in every diagnostic, so 6 is the recommended floor.
+
+Scales above `0.01` were not re-run with `head_to_tail`.  The previous
+`tail_to_head` calibration suggested `frac` requirements rise steeply
+(`scale=0.05` needed `frac=10`, `scale=1.0` needed `frac=400`).  Treat those
+as indicative only and re-run `scripts/run_soft_stability_map.py
+--scales 0.05 0.1 1.0 --added-mass-frac 1 10 25 100 400
+--wave-direction head_to_tail` before using high torque scales in production.
 
 Pushing `frac` high enough to stabilise `scale=1` (>=400 here) leaves
 the backbone effectively rigid; for genuine full-coupling FSI a
